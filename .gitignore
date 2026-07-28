@@ -1,0 +1,25 @@
+# Environment variables
+.env
+
+# Audio files (may exceed 100MB)
+Docs/Audio/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Output transcripts (generated files)
+Output/transcripts/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store
