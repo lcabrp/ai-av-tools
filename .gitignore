@@ -1,8 +1,10 @@
 # Environment variables
 .env
 
-# Audio files (may exceed 100MB)
+# Audio and Video files (may exceed 100MB)
 Docs/Audio/
+Docs/Video/
+
 
 # Python
 __pycache__/
