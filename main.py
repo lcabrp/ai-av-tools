@@ -11,14 +11,17 @@ from scripts.Python.transcribe import transcribe_media
 
 def process_pipeline(
     input_path: str,
-    whisper_model: str = "base",
+    whisper_model: str = "medium",
     provider: str = "auto",
-    openai_model: str = "gpt-4o-mini",
+    openai_model: str = "gpt-5.6-luna",
     anthropic_model: str = "claude-sonnet-4-6",
     gemini_model: str = "gemini-flash-latest",
     language: str | None = None,
     transcripts_dir: str = "Output/transcripts",
     output_dir: str = "Output",
+    use_chunking: bool = False,
+    chunk_chars: int = 3000,
+    gemini_chunk_chars: int = 15000,
 ):
     print("=== Step 1: Transcribing audio/video ===")
     transcript_files = transcribe_media(
@@ -41,6 +44,9 @@ def process_pipeline(
             openai_model=openai_model,
             anthropic_model=anthropic_model,
             gemini_model=gemini_model,
+            use_chunking=use_chunking,
+            chunk_chars=chunk_chars,
+            gemini_chunk_chars=gemini_chunk_chars,
         )
 
     print("\n=== Pipeline Complete ===")
@@ -53,20 +59,20 @@ def main():
     parser.add_argument("input", help="Path to audio/video file or directory")
     parser.add_argument(
         "--whisper-model",
-        default="base",
+        default="medium",
         choices=["tiny", "base", "small", "medium", "large"],
-        help="Whisper model size for transcription (default: base)",
+        help="Whisper model size for transcription (default: medium)",
     )
     parser.add_argument(
         "--provider",
         default="auto",
         choices=["auto", "ollama", "openai", "anthropic", "gemini"],
-        help="LLM provider for summary: auto (ollama -> anthropic -> gemini -> openai), ollama, openai, anthropic, or gemini (default: auto)",
+        help="LLM provider for summary: auto (gemini -> anthropic -> openai -> ollama), ollama, openai, anthropic, or gemini (default: auto)",
     )
     parser.add_argument(
         "--openai-model",
-        default="gpt-4o-mini",
-        help="OpenAI model to use (default: gpt-4o-mini, e.g. gpt-4o, o3-mini)",
+        default="gpt-5.6-luna",
+        help="OpenAI model to use (default: gpt-5.6-luna, e.g. gpt-5.6-terra, gpt-5.6-sol)",
     )
     parser.add_argument(
         "--anthropic-model",
@@ -93,6 +99,26 @@ def main():
         default="Output",
         help="Directory to save summary markdown files (default: Output)",
     )
+    parser.add_argument(
+        "--chunked",
+        action="store_true",
+        help="Use map-reduce chunked summarization for the local Ollama fallback, to avoid detail loss on "
+             "long transcripts with small/low-VRAM models (recommended on 4-8GB GPUs). Gemini already "
+             "auto-chunks long transcripts regardless of this flag.",
+    )
+    parser.add_argument(
+        "--chunk-chars",
+        type=int,
+        default=3000,
+        help="Max characters per chunk when --chunked is used (default: 3000; lower for less VRAM)",
+    )
+    parser.add_argument(
+        "--gemini-chunk-chars",
+        type=int,
+        default=15000,
+        help="Chunk size threshold for Gemini: transcripts longer than this are automatically "
+             "summarized via map-reduce chunking for better detail retention (default: 15000)",
+    )
 
     args = parser.parse_args()
     process_pipeline(
@@ -105,6 +131,9 @@ def main():
         language=args.language,
         transcripts_dir=args.transcripts_dir,
         output_dir=args.output_dir,
+        use_chunking=args.chunked,
+        chunk_chars=args.chunk_chars,
+        gemini_chunk_chars=args.gemini_chunk_chars,
     )
 
 

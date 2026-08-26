@@ -52,7 +52,7 @@ def transcribe_file(file_path: Path, model: whisper.Whisper, output_dir: Path) -
     return output_file
 
 
-def transcribe_media(input_path: str, model_size: str = "base", output_dir: str = "Output/transcripts") -> list[Path]:
+def transcribe_media(input_path: str, model_size: str = "medium", output_dir: str = "Output/transcripts") -> list[Path]:
     target = Path(input_path)
     if not target.exists():
         print(f"Error: Path not found: {input_path}")
@@ -88,9 +88,9 @@ def main():
     parser.add_argument("input", help="Path to audio/video file or directory")
     parser.add_argument(
         "--model",
-        default="base",
+        default="medium",
         choices=["tiny", "base", "small", "medium", "large"],
-        help="Whisper model size (default: base)",
+        help="Whisper model size (default: medium)",
     )
     parser.add_argument(
         "--output-dir",

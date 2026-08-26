@@ -21,8 +21,8 @@ uv sync
 1. Install [Ollama](https://ollama.com)
 2. Pull models:
 ```bash
+ollama pull gemma4:12b
 ollama pull gemma4:e4b
-ollama pull gemma4:e2b
 ```
 
 ### Cloud Models & API Keys
@@ -45,8 +45,8 @@ Process a single video/audio file or an entire directory of media files:
 # Process a video or audio file (or folder) with smart automatic model fallback
 uv run main.py Docs/Video/JaimeHiguera
 
-# Specify whisper model and summary provider explicitly
-uv run main.py Docs/Video/JaimeHiguera --whisper-model base --provider auto
+# Specify whisper model and summary provider explicitly (medium is the default; more accurate than base)
+uv run main.py Docs/Video/JaimeHiguera --whisper-model medium --provider auto
 ```
 
 ### Transcribe Audio/Video
@@ -57,19 +57,22 @@ Supports `.wav`, `.mp3`, `.m4a`, `.mp4`, `.mov`, `.mkv`, etc., for single files 
 uv run scripts/Python/transcribe.py Docs/Video/JaimeHiguera
 ```
 
-Detects language automatically and saves transcripts to `Output/transcripts/`.
+Detects language automatically and saves transcripts to `Output/transcripts/`. Default model is
+`medium` — noticeably more accurate than `base` for real conversations (mumbled speech, accents,
+crosstalk), which matters because a garbled transcript can't be recovered by even the best
+summarization model. Use `--model large` for maximum accuracy if you can tolerate the extra runtime.
 
 ### Summarize Transcripts
 
 Summarize single transcript files or all transcripts in a directory using your choice of LLM provider:
 
 ```bash
-# Auto mode: Ollama (e4b -> e2b) -> Anthropic -> Gemini -> OpenAI
+# Auto mode: Gemini -> Anthropic -> OpenAI -> Ollama (12b -> e4b)
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider auto
 
 # Specific providers
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider ollama
-uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider openai --openai-model gpt-4o
+uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider openai --openai-model gpt-5.6-terra
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider anthropic --anthropic-model claude-sonnet-4-6
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider gemini --gemini-model gemini-flash-latest
 
@@ -77,9 +80,51 @@ uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider gemi
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --language english
 ```
 
+#### Default provider: Gemini, with automatic chunking
+
+`gemini-flash-latest` is the default/preferred provider — in side-by-side comparisons against
+Ollama (`gemma4:12b`/`e4b`), OpenAI (`gpt-5.6-sol/terra/luna`), and Anthropic (`claude-sonnet-4-6`),
+it consistently retained the most concrete detail (prices, names, step-by-step instructions).
+
+Long transcripts (> `--gemini-chunk-chars`, default **15000** characters) are **automatically**
+summarized using map-reduce chunking: each chunk is summarized individually, then merged into one
+final document. This measurably improves detail retention on long/dense sessions — in testing, it
+surfaced multiple individually-named cases and verbatim step-by-step instructions that a single-shot
+call missed entirely, at the cost of a handful of extra API calls (e.g. ~9 calls for a 2-hour session).
+Short transcripts skip chunking automatically since they fit in one call.
+
+```bash
+# Tune the chunk-size threshold (smaller = more calls, marginally safer for very dense content)
+uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider gemini --gemini-chunk-chars 15000
+```
+
+#### Local models (Ollama) and low-VRAM machines
+
+For the local Ollama fallback (`gemma4:12b` primary, `gemma4:e4b` secondary), use `--chunked` to
+apply the same map-reduce approach. This matters much more for local models than for Gemini, since
+small/quantized models have limited effective context and silently drop sections on long transcripts
+otherwise.
+
+```bash
+uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider ollama --chunked --chunk-chars 3000
+```
+
+**Finding the right `--chunk-chars` for your GPU** (do this once per machine):
+1. Check the model's disk size with `ollama list` — this is roughly how much VRAM the weights need.
+2. Run a chunk and check `ollama ps` — it reports a GPU/CPU % split. Any CPU % means the current
+   chunk size (prompt + context) doesn't fully fit in VRAM and is slowing down.
+3. Adjust `--chunk-chars` up/down until `ollama ps` shows ~100% GPU, then back off ~10-15% for safety.
+4. Rough starting points by VRAM: **8GB** → `gemma4:12b` at ~3000-4000 chars; **6GB** → prefer
+   `gemma4:e4b` at ~2000-2500 chars; **4GB** → `gemma4:e4b` only, ~1000-1500 chars (or just rely on
+   Gemini instead of local).
+
+Bigger chunks aren't automatically better for local models — in testing, `gemma4:12b` on an 8GB GPU
+actually produced a *less* complete summary at 5000 chars/chunk than at 3000, since there was very
+little VRAM headroom left over after the model weights.
+
 ### Multi-Model Benchmark Comparison
 
-Compare generated summaries from **Ollama (Gemma)**, **OpenAI (GPT-4o / o3-mini / GPT-4o-mini)**, **Anthropic (Claude Sonnet)**, and **Google (Gemini Flash)** side-by-side without overwriting:
+Compare generated summaries from **Ollama** (`gemma4:12b`), **OpenAI** (`gpt-5.6-sol/terra/luna`), **Anthropic** (`claude-sonnet-4-6`), and **Google** (`gemini-flash-latest`) side-by-side without overwriting:
 
 ```bash
 uv run scripts/Python/compare_models.py Output/transcripts/sample.txt
@@ -99,9 +144,24 @@ main.py              # Main end-to-end pipeline CLI
 
 ## Models Supported
 
-- **Transcription**: OpenAI Whisper (local CUDA-accelerated, supports all audio and video formats)
+- **Transcription**: OpenAI Whisper (local CUDA-accelerated, supports all audio and video formats; default model `medium`)
 - **Summarization**:
-  - **Local**: Ollama `gemma4:e4b`, `gemma4:e2b`
-  - **OpenAI**: `gpt-4o`, `o3-mini`, `gpt-4o-mini`
+  - **Default**: Google Gemini `gemini-flash-latest` (best detail retention in internal benchmarks; auto-chunks long transcripts)
+  - **Local**: Ollama `gemma4:12b`, `gemma4:e4b`
+  - **OpenAI**: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
   - **Anthropic**: `claude-sonnet-4-6`
   - **Google**: `gemini-flash-latest`
+
+## Notes on Summary Quality
+
+- **Prompting**: all providers share a detail-preserving system prompt (see `build_system_prompt` in
+  `scripts/Python/summarize.py`) that explicitly instructs the model to keep numbers, names, tool/platform
+  names, and step-by-step instructions rather than compressing them into vague generalizations. This helps
+  smaller/local models the most, since they compress more aggressively than frontier cloud models by default.
+- **`.env` loading**: `summarize.py` loads `.env` from an explicit path (project root), rather than relying on
+  `python-dotenv`'s stack-frame-based auto-discovery, which was found to unpredictably skip loading depending
+  on which script imported the module first (e.g. running `compare_models.py` directly vs. importing it).
+- **API keys**: if a provider fails with an auth error, double check the key is still valid (e.g. Anthropic
+  keys can be revoked/regenerated in the [Anthropic Console](https://console.anthropic.com/settings/keys)).
+  Workload identity federation (short-lived cloud-issued tokens) is not applicable here since this project
+  runs as local scripts, not from a CI/cloud provider with an identity provider.

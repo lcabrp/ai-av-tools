@@ -16,12 +16,11 @@ from scripts.Python.summarize import (
 
 
 MODELS_TO_TEST = [
-    {"name": "gemma4_e2b", "provider": "ollama", "model": "gemma4:e2b"},
-    {"name": "gpt4o_mini", "provider": "openai", "model": "gpt-4o-mini"},
-    {"name": "gpt4o", "provider": "openai", "model": "gpt-4o"},
-    {"name": "o3_mini", "provider": "openai", "model": "o3-mini"},
+    {"name": "gemma4_12b", "provider": "ollama", "model": "gemma4:12b"},
+    {"name": "gpt_luna", "provider": "openai", "model": "gpt-5.6-luna"},
+    {"name": "gpt_terra", "provider": "openai", "model": "gpt-5.6-terra"},
+    {"name": "gpt_sol", "provider": "openai", "model": "gpt-5.6-sol"},
     {"name": "claude_sonnet", "provider": "anthropic", "model": "claude-sonnet-4-6"},
-
     {"name": "gemini_flash", "provider": "gemini", "model": "gemini-flash-latest"},
 ]
 
