@@ -18,6 +18,9 @@ build/
 # Output transcripts (generated files)
 Output/transcripts/
 
+# Benchmark artifacts
+bench_output/
+
 # IDE
 .vscode/
 .idea/

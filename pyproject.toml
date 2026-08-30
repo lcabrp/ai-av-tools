@@ -12,6 +12,7 @@ dependencies = [
     "google-genai>=0.1.1",
     "torch",
     "torchaudio",
+    "faster-whisper>=1.2.1",
 ]
 
 

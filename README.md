@@ -62,6 +62,9 @@ Detects language automatically and saves transcripts to `Output/transcripts/`. D
 crosstalk), which matters because a garbled transcript can't be recovered by even the best
 summarization model. Use `--model large` for maximum accuracy if you can tolerate the extra runtime.
 
+To benchmark transcription speed/quality of openai-whisper vs faster-whisper on a given GPU, see
+[`Docs/whisper-benchmark.md`](Docs/whisper-benchmark.md) and `scripts/Python/benchmark_transcription.py`.
+
 ### Summarize Transcripts
 
 Summarize single transcript files or all transcripts in a directory using your choice of LLM provider:
