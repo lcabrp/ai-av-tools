@@ -64,6 +64,9 @@ summarization model. Use `--model large` for maximum accuracy if you can tolerat
 
 To benchmark transcription speed/quality of openai-whisper vs faster-whisper on a given GPU, see
 [`Docs/whisper-benchmark.md`](Docs/whisper-benchmark.md) and `scripts/Python/benchmark_transcription.py`.
+Current benchmark results recommend faster-whisper `medium`: FP16 on modern RTX GPUs, or
+INT8/FP16 on the NVIDIA T1000. Cross-machine results are tracked in
+[`Docs/transcription-benchmark-results.csv`](Docs/transcription-benchmark-results.csv).
 
 ### Summarize Transcripts
 

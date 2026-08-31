@@ -6,6 +6,27 @@ appeared no faster here — that turned out to be a flawed test (see "The CPU tr
 
 Script: `scripts/Python/benchmark_transcription.py` (run with `uv run`).
 
+## Recommendation
+
+Use **`faster-whisper` with the `medium` model** for local transcription. It runs the same
+Whisper model through CTranslate2 and was substantially faster than `openai-whisper` without an
+observed quality regression in these tests.
+
+Choose the compute type for the GPU:
+
+- Modern NVIDIA RTX GPUs with tensor cores: use `compute_type="float16"`. On the RTX 4070 it was
+  effectively tied with INT8/FP16, so FP16 is the conservative default when quality is the priority.
+- NVIDIA T1000 8GB and similar non-tensor-core Turing GPUs: use
+  `compute_type="int8_float16"`. The T1000's INT8 path was about 2.9x faster than its FP16 path.
+- Keep `medium` as the default model. Earlier testing found `base` too inaccurate for real
+  conversations with accents, mumbled speech, and crosstalk.
+
+`faster-whisper` also decodes media through PyAV, while `openai-whisper` shells out to FFmpeg.
+FFmpeg is still required by the benchmark script to create a consistent timed slice.
+
+The production transcription script still uses `openai-whisper`; migrating it to
+`faster-whisper` is a separate implementation change.
+
 ## Reference results — NVIDIA T1000 8GB
 
 System: T1000 8GB (Turing TU117, compute capability 7.5, **no tensor cores**), driver 595.79,
@@ -44,6 +65,31 @@ Full 53.4-min file with `faster-whisper medium cuda int8_float16 beam_size=5`:
 3. `medium` remains the quality floor (`base` insufficient for this content), so speedups must
    come from the runtime, not a smaller model.
 4. Expect roughly linear scaling: 300s slice times ÷ 300 × file duration ≈ full-file time.
+
+## RTX 4070 comparison
+
+System: XPS-8960, RTX 4070 12GB (Ada, compute capability 8.9), driver 595.95,
+torch 2.6.0+cu124, Python 3.13.12, openai-whisper 20250625, faster-whisper 1.2.1.
+The same first 300 seconds of the same Spanish recording were used.
+
+| Backend | Config | T1000 | RTX 4070 | RTX speedup |
+|---|---|---:|---:|---:|
+| openai-whisper medium | fp16 | 109.2s | 20.9s | 5.2x |
+| faster-whisper medium | float16 | 119.9s | 10.9s | 11.0x |
+| faster-whisper medium | int8_float16 | 40.9s | 10.6s | 3.9x |
+
+On the RTX 4070, faster-whisper FP16 took 10.9s versus 20.9s for openai-whisper FP16, a
+1.9x backend speedup. INT8/FP16 was only 0.3s faster than FP16, which is too small to justify
+quantization when the goal is speed without sacrificing quality. The FP16 transcript retained
+3,794 characters and had 98.9% normalized word-sequence similarity to the FP32 transcript.
+
+The 53.4-minute source should take roughly two minutes on the RTX 4070 if throughput scales
+linearly, versus the measured 7.4 minutes on the T1000.
+
+These quality comparisons are indicators, not word-error-rate measurements: there is no manually
+verified reference transcript. Character count alone is not a quality score. The strongest result
+is that FP16, INT8/FP16, and FP32 produced highly similar text while faster-whisper preserved more
+punctuation and slightly more text than openai-whisper.
 
 ## The CPU trap (what went wrong initially)
 
@@ -86,15 +132,21 @@ uv run scripts/Python/benchmark_transcription.py file.mp3 --all-models
 ```
 
 The script saves each transcript plus `bench_output/benchmark_report.txt` (system header +
-timing table). When comparing GPUs, share that report file; note especially:
+timing table). It also updates `Docs/transcription-benchmark-results.csv`, which is the shared,
+portable dataset for comparing machines. Commit or copy that CSV between machines before running
+the benchmark so each laptop adds its results. Use `--machine-name` to override the OS hostname.
+
+When comparing GPUs, note especially:
 
 - GPU model, VRAM, compute capability, driver version
 - which `compute_type` won: try `float16` vs `int8_float16` — tensor-core GPUs usually prefer
   `float16`, non-tensor-core Turing (T1000/GTX 16-series) prefers `int8_float16`
 - whether anything fell back to CPU (chars/time vs the T1000 reference above is a good sanity check)
+- compare transcription time separately from model load time; first use may include model downloads,
+  while later runs use the local cache
+- use the same audio, 300-second slice, language, model, and beam size for meaningful comparisons
 
 ## Follow-up
 
-Consider switching `scripts/Python/transcribe.py` from openai-whisper to
-`faster-whisper` (`device="cuda"`, `compute_type="int8_float16"` on the T1000) for ~2.7x
-throughput at the same quality. Summarization stays on Gemini (best detail retention).
+Switch `scripts/Python/transcribe.py` from openai-whisper to faster-whisper, selecting FP16 on
+modern RTX GPUs and INT8/FP16 on the T1000. Summarization stays on Gemini (best detail retention).

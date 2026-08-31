@@ -6,6 +6,7 @@ See Docs/whisper-benchmark.md for recorded results and how to reproduce on anoth
 """
 
 import argparse
+import csv
 import os
 import shutil
 import socket
@@ -19,6 +20,18 @@ from pathlib import Path
 import torch
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+COMPARISON_FIELDS = [
+    "recorded_at", "machine", "gpu", "compute_capability", "vram_gb",
+    "driver", "python", "torch", "cuda_runtime", "backend_version",
+    "audio_file", "sample_seconds", "language", "backend", "config",
+    "device", "load_seconds", "transcribe_seconds", "total_seconds",
+    "characters", "status", "transcript_file",
+]
+COMPARISON_KEY = [
+    "machine", "gpu", "audio_file", "sample_seconds", "language",
+    "backend", "config",
+]
 
 
 def ensure_ffmpeg_in_path():
@@ -41,32 +54,116 @@ def pkg_version(name: str) -> str:
         return "not installed"
 
 
-def system_header() -> list[str]:
-    lines = [
-        f"date: {datetime.now().isoformat(timespec='seconds')}",
-        f"hostname: {socket.gethostname()}",
-        f"python: {sys.version.split()[0]}",
-        f"torch: {torch.__version__} (cuda_available={torch.cuda.is_available()}, cuda_runtime={torch.version.cuda})",
-        f"openai-whisper: {pkg_version('openai-whisper')}",
-        f"faster-whisper: {pkg_version('faster-whisper')}",
-    ]
+def system_info(machine_name: str | None = None) -> dict:
+    info = {
+        "recorded_at": datetime.now().isoformat(timespec="seconds"),
+        "machine": machine_name or socket.gethostname(),
+        "python": sys.version.split()[0],
+        "torch": str(torch.__version__),
+        "cuda_available": torch.cuda.is_available(),
+        "cuda_runtime": torch.version.cuda or "",
+        "openai_whisper": pkg_version("openai-whisper"),
+        "faster_whisper": pkg_version("faster-whisper"),
+        "gpu": "none",
+        "compute_capability": "",
+        "vram_gb": "",
+        "sms": "",
+        "driver": "not found",
+    }
     if torch.cuda.is_available():
         p = torch.cuda.get_device_properties(0)
-        lines.append(
-            f"gpu: {p.name} (compute capability {p.major}.{p.minor}, "
-            f"{p.total_memory / 1024**3:.1f} GB VRAM, {p.multi_processor_count} SMs)"
+        info.update(
+            gpu=p.name,
+            compute_capability=f"{p.major}.{p.minor}",
+            vram_gb=f"{p.total_memory / 1024**3:.1f}",
+            sms=str(p.multi_processor_count),
         )
-    else:
-        lines.append("gpu: none visible to torch -- CPU-only run")
     try:
         out = subprocess.run(
             ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
             capture_output=True, text=True, check=True, timeout=10,
         )
-        lines.append(f"nvidia driver: {out.stdout.strip().splitlines()[0]}")
+        info["driver"] = out.stdout.strip().splitlines()[0]
     except Exception:
-        lines.append("nvidia driver: nvidia-smi not found")
+        pass
+    return info
+
+
+def system_header(info: dict) -> list[str]:
+    lines = [
+        f"date: {info['recorded_at']}",
+        f"hostname: {info['machine']}",
+        f"python: {info['python']}",
+        f"torch: {info['torch']} (cuda_available={info['cuda_available']}, cuda_runtime={info['cuda_runtime']})",
+        f"openai-whisper: {info['openai_whisper']}",
+        f"faster-whisper: {info['faster_whisper']}",
+    ]
+    if info["cuda_available"]:
+        lines.append(
+            f"gpu: {info['gpu']} (compute capability {info['compute_capability']}, "
+            f"{info['vram_gb']} GB VRAM, {info['sms']} SMs)"
+        )
+    else:
+        lines.append("gpu: none visible to torch -- CPU-only run")
+    lines.append(f"nvidia driver: {info['driver']}")
     return lines
+
+
+def save_comparison_csv(path: Path, rows: list[dict], info: dict,
+                        audio_file: str, sample_seconds: int,
+                        language: str | None):
+    records = []
+    if path.exists():
+        with path.open(newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames != COMPARISON_FIELDS:
+                raise ValueError(f"Unexpected comparison CSV columns in {path}")
+            records = list(reader)
+
+    new_records = []
+    for row in rows:
+        backend_version = (
+            info["openai_whisper"] if row["backend"] == "openai-whisper"
+            else info["faster_whisper"]
+        )
+        new_records.append({
+            "recorded_at": info["recorded_at"],
+            "machine": info["machine"],
+            "gpu": info["gpu"],
+            "compute_capability": info["compute_capability"],
+            "vram_gb": info["vram_gb"],
+            "driver": info["driver"],
+            "python": info["python"],
+            "torch": info["torch"],
+            "cuda_runtime": info["cuda_runtime"],
+            "backend_version": backend_version,
+            "audio_file": audio_file,
+            "sample_seconds": str(sample_seconds),
+            "language": language or "auto",
+            "backend": row["backend"],
+            "config": row["config"],
+            "device": row["device"],
+            "load_seconds": fmt(row["load_s"]),
+            "transcribe_seconds": fmt(row["run_s"]),
+            "total_seconds": fmt(row["total_s"]),
+            "characters": str(row["chars"]) if row["chars"] is not None else "",
+            "status": "ok" if row["error"] is None else row["error"],
+            "transcript_file": Path(row["output"]).name if row["output"] else "",
+        })
+
+    new_keys = {tuple(record[field] for field in COMPARISON_KEY) for record in new_records}
+    records = [
+        record for record in records
+        if tuple(record[field] for field in COMPARISON_KEY) not in new_keys
+    ]
+    records.extend(new_records)
+    records.sort(key=lambda record: tuple(record[field] for field in COMPARISON_KEY))
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=COMPARISON_FIELDS)
+        writer.writeheader()
+        writer.writerows(records)
 
 
 def make_slice(audio: Path, seconds: int, outdir: Path) -> Path:
@@ -166,13 +263,18 @@ def main():
     parser.add_argument("--skip-faster", action="store_true")
     parser.add_argument("--output-dir", default="bench_output",
                         help="Where to save transcripts and the report (default: bench_output)")
+    parser.add_argument("--comparison-csv", default="Docs/transcription-benchmark-results.csv",
+                        help="Shared CSV updated with this run (default: Docs/transcription-benchmark-results.csv)")
+    parser.add_argument("--machine-name", default=None,
+                        help="Machine label for comparison results (default: OS hostname)")
     args = parser.parse_args()
 
     ensure_ffmpeg_in_path()
 
-    audio = Path(args.audio).expanduser().resolve()
-    if not audio.exists():
-        sys.exit(f"Error: audio file not found: {audio}")
+    source_audio = Path(args.audio).expanduser().resolve()
+    if not source_audio.exists():
+        sys.exit(f"Error: audio file not found: {source_audio}")
+    audio = source_audio
 
     outdir = Path(args.output_dir)
     outdir.mkdir(parents=True, exist_ok=True)
@@ -181,7 +283,8 @@ def main():
         print(f"Extracting first {args.slice}s with ffmpeg ...")
         audio = make_slice(audio, args.slice, outdir)
 
-    header = system_header()
+    info = system_info(args.machine_name)
+    header = system_header(info)
     print("\n=== System ===")
     for line in header:
         print(line)
@@ -224,8 +327,12 @@ def main():
     ]
     report = outdir / "benchmark_report.txt"
     report.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
+    comparison_csv = Path(args.comparison_csv)
+    save_comparison_csv(
+        comparison_csv, rows, info, source_audio.name, args.slice, args.language,
+    )
     print(f"\nTranscripts and report saved to: {outdir}/")
-    print("When comparing GPUs, share bench_output/benchmark_report.txt")
+    print(f"Comparison results updated: {comparison_csv}")
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ build/
 Output/transcripts/
 
 # Benchmark artifacts
-bench_output/
+bench_output*/
 
 # IDE
 .vscode/
