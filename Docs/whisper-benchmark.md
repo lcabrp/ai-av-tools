@@ -91,6 +91,44 @@ verified reference transcript. Character count alone is not a quality score. The
 is that FP16, INT8/FP16, and FP32 produced highly similar text while faster-whisper preserved more
 punctuation and slightly more text than openai-whisper.
 
+## RTX A4000 Laptop comparison
+
+System: ZBookFuryG8, RTX A4000 Laptop GPU 8GB (Ampere, compute capability 8.6), driver 595.95,
+torch 2.6.0+cu124, Python 3.13.13, openai-whisper 20250625, faster-whisper 1.2.1.
+Same first 300 seconds of the same Spanish recording as above.
+
+| Backend | Config | T1000 | RTX 4070 | RTX A4000 |
+|---|---|---:|---:|---:|
+| openai-whisper medium | fp16 | 109.2s | 20.9s | 33.2s |
+| faster-whisper medium | float16 | 119.9s | 10.9s | **15.6s** |
+| faster-whisper medium | int8_float16 | 40.9s | 10.6s | 18.2s |
+| faster-whisper medium | float32 | — | 13.7s | 22.5s |
+
+The A4000 is ~7.7x faster than the T1000 on `float16` and ~3.3x on openai-whisper `medium`.
+It is slower than the 12 GB RTX 4070 as expected, but confirms the tensor-core pattern:
+`float16` beats `int8_float16` on Ampere/Ada, while the non-tensor-core T1000 prefers `int8_float16`.
+Results are in `Docs/transcription-benchmark-results.csv` (machine `ZBookFuryG8`).
+
+## Summarization benchmark — 2026-08 (Unitec webinars)
+
+Two Spanish webinars (~91-99k chars / ~16.6k words) were transcribed with Whisper `medium` and
+summarized with cloud and local models. See transcripts in `Output/transcripts/` (git-ignored).
+
+| Provider | Model | Method | Quality |
+|---|---|---|---|
+| OpenAI | `gpt-5.6-luna` | single-shot | Most detailed / source-faithful (5,530 words, 1,119 lines on 2026-08-25); preserves caveats and long-tail topics |
+| Google | `gemini-flash-latest` | 7-8 × 15k map-reduce | Best concise executive summary (2,753 words); strong price/bonus density but some reduction conflations (e.g. merged Peru testimonials, pricing example) |
+| Local | `gemma4:e4b-it-qat` 6.1 GB (QAT) | 32 × 3k map-reduce | Spanish-capable, 100% GPU 3.1 GB on 8 GB A4000; smoke test 6k chars → 73.6s (24.5s/chunk, ~13 min projected full) vs `gemma4:12b` 7.6 GB at 31%/69% CPU/GPU (~51 min/chunk, ~27 h full). Output shallower than cloud, occasional entity errors |
+| Local | `gemma4:12b` 7.6 GB | 32 × 3k map-reduce | Good quality when run but CPU offload makes it impractical on 8 GB |
+
+The `summarize.py` chunker was fixed to hard-wrap long Whisper stretches without sentence boundaries
+(`scripts/Python/summarize.py:51-74`), otherwise a 99k-char transcript produced only 2 chunks and
+silently dropped context. Local Ollama also defaults to 4096 context; the 32-chunk reduce prompt
+exceeds that and needs `num_ctx` ≥16384 or batched hierarchical reduce.
+
+Decision: keep **OpenAI (`gpt-5.6-luna`) and Gemini (`gemini-flash-latest`)** for production summaries.
+Local Gemma is retained for experimentation/offline fallback only.
+
 ## The CPU trap (what went wrong initially)
 
 The first "benchmark" used bare `pip install` + `python` instead of `uv`. That installed
@@ -149,4 +187,5 @@ When comparing GPUs, note especially:
 ## Follow-up
 
 Switch `scripts/Python/transcribe.py` from openai-whisper to faster-whisper, selecting FP16 on
-modern RTX GPUs and INT8/FP16 on the T1000. Summarization stays on Gemini (best detail retention).
+modern RTX GPUs and INT8/FP16 on the T1000. Summarization stays on Gemini/OpenAI (best detail
+retention); local Gemma is for experimentation only.

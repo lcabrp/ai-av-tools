@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+import textwrap
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -59,11 +60,15 @@ def chunk_transcript(transcript: str, max_chars: int = 3000) -> list[str]:
     current = ""
     for sentence in sentences:
         piece = sentence if sentence.endswith(".") else sentence + "."
-        if current and len(current) + len(piece) + 1 > max_chars:
-            chunks.append(current.strip())
-            current = piece
-        else:
-            current = f"{current} {piece}".strip()
+        # Whisper output can contain very long stretches without periods.
+        # Hard-wrap those stretches so no chunk exceeds the model's budget.
+        for part in textwrap.wrap(piece, width=max_chars, break_long_words=True,
+                                  break_on_hyphens=False) or [piece]:
+            if current and len(current) + len(part) + 1 > max_chars:
+                chunks.append(current.strip())
+                current = part
+            else:
+                current = f"{current} {part}".strip()
     if current.strip():
         chunks.append(current.strip())
     return chunks
