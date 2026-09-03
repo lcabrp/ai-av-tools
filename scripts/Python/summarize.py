@@ -1,7 +1,9 @@
 import argparse
+import json
 import os
 import sys
 import textwrap
+import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -77,20 +79,28 @@ def chunk_transcript(transcript: str, max_chars: int = 3000) -> list[str]:
 def build_chunk_extraction_prompt(chunk: str, index: int, total: int, language: str) -> str:
     return (
         f"This is fragment {index}/{total} of a longer transcript (do not summarize the whole "
-        f"conversation, only this fragment). Extract ALL concrete details mentioned here as a flat "
-        f"markdown bullet list: numbers, prices, dates, names, tool/platform names, steps, and "
-        f"decisions. Do not omit anything specific, even if it seems minor. Do not add headers, "
-        f"titles, or commentary — only bullet points. Write in {language}.\n\n"
+        f"conversation, only this fragment). Extract ALL concrete details as a flat markdown bullet "
+        f"list. Preserve who said or asked each item and label it as [Question], [Answer], [Example], "
+        f"[Decision], [Action: owner], [Correction], or [Unresolved] when the category is clear. "
+        f"Keep numbers, prices, dates, names, tools, URLs, ordered steps, deadlines, conditions, and "
+        f"speaker uncertainty verbatim where possible. Explicitly preserve rejected ideas and later "
+        f"corrections; never turn a participant's question, assumption, or numerical example into a "
+        f"confirmed fact or recommendation. Do not infer missing facts or normalize uncertain names. "
+        f"Do not omit anything specific, even if it seems minor. Do not add headers, titles, or "
+        f"commentary — only bullets. Write in {language}.\n\n"
         f"Fragment:\n{chunk}"
     )
 
 
 def build_reduce_prompt(combined_notes: str, language: str) -> str:
     return (
-        f"Below are detailed notes extracted from consecutive fragments of the same transcript, in order. "
-        f"Merge them into a single, well-organized markdown summary. Do not drop any specific detail "
-        f"(numbers, names, steps, decisions) already present in the notes — only reorganize, deduplicate, "
-        f"and structure them. Follow the system instructions for structure and write in {language}.\n\n"
+        f"Below are detailed notes extracted from consecutive transcript fragments, in order. Merge "
+        f"them without changing epistemic status: questions remain questions, examples remain examples, "
+        f"rejected ideas remain rejected, and only explicit answers or decisions become recommendations. "
+        f"Preserve speaker/owner attribution, uncertain names, corrections, contradictions, numbers, names, "
+        f"steps, deadlines, conditions, unresolved items, and individual cases. Deduplicate only genuinely "
+        f"repeated information. Do not resolve contradictions yourself or add outside facts. Produce a "
+        f"well-organized markdown summary following the system instructions in {language}.\n\n"
         f"Notes:\n{combined_notes}"
     )
 
@@ -116,23 +126,109 @@ def generate_chunked(
     return call_fn(build_system_prompt(language), build_reduce_prompt(combined_notes, language))
 
 
+def group_notes(notes: list[str], max_chars: int) -> list[str]:
+    groups = []
+    current = []
+    current_chars = 0
+    for note in notes:
+        added_chars = len(note) + (2 if current else 0)
+        if current and current_chars + added_chars > max_chars:
+            groups.append("\n\n".join(current))
+            current = [note]
+            current_chars = len(note)
+        else:
+            current.append(note)
+            current_chars += added_chars
+    if current:
+        groups.append("\n\n".join(current))
+    return groups
+
+
+def generate_hierarchical_chunked(
+    extract_fn, reduce_fn, transcript: str, language: str,
+    chunk_chars: int = 3000, reduce_chars: int = 12000,
+) -> str:
+    chunks = chunk_transcript(transcript, max_chars=chunk_chars)
+    print(f"  Chunked transcript into {len(chunks)} piece(s) of ~{chunk_chars} chars...", flush=True)
+
+    notes = []
+    for i, chunk in enumerate(chunks, start=1):
+        notes.append(extract_fn(
+            "Extract transcript facts precisely. Preserve attribution and epistemic status.",
+            build_chunk_extraction_prompt(chunk, i, len(chunks), language),
+        ))
+        print(f"    Extracted chunk {i}/{len(chunks)}", flush=True)
+
+    level = 1
+    while len(notes) > 1:
+        groups = group_notes(notes, reduce_chars)
+        if len(groups) == 1:
+            break
+        reduced = []
+        for i, group in enumerate(groups, start=1):
+            reduced.append(reduce_fn(
+                "Consolidate transcript notes without losing attribution, corrections, or concrete facts.",
+                build_reduce_prompt(group, language),
+            ))
+            print(f"    Reduced level {level} group {i}/{len(groups)}", flush=True)
+        notes = reduced
+        level += 1
+
+    combined_notes = "\n\n".join(notes)
+    return reduce_fn(build_system_prompt(language), build_reduce_prompt(combined_notes, language))
+
+
+def generate_with_ollama(
+    model: str, system_prompt: str, user_prompt: str,
+    context_tokens: int = 32768, temperature: float = 0.1,
+    num_predict: int = 8192,
+) -> str:
+    base_url = OLLAMA_BASE_URL.removesuffix("/v1").rstrip("/")
+    payload = {
+        "model": model,
+        "stream": False,
+        "think": False,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "options": {
+            "num_ctx": context_tokens,
+            "num_predict": num_predict,
+            "temperature": temperature,
+        },
+    }
+    request = urllib.request.Request(
+        f"{base_url}/api/chat",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=1800) as response:
+        result = json.load(response)
+    return result["message"]["content"]
+
+
 def generate_with_ollama_chunked(
-    client: OpenAI, model: str, transcript: str, language: str, chunk_chars: int = 3000
+    model: str, transcript: str, language: str, chunk_chars: int = 3000,
+    reduce_chars: int = 12000, context_tokens: int = 32768,
+    temperature: float = 0.1,
 ) -> str:
     """Map-reduce summarization for local models: summarize each chunk separately,
     then merge, so long transcripts don't exceed a small model's effective context."""
 
-    def call_fn(system_prompt: str, user_prompt: str) -> str:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
+    def extract_fn(system_prompt: str, user_prompt: str) -> str:
+        return generate_with_ollama(
+            model, system_prompt, user_prompt, context_tokens, temperature, 1024,
         )
-        return response.choices[0].message.content
 
-    return generate_chunked(call_fn, transcript, language, chunk_chars)
+    def reduce_fn(system_prompt: str, user_prompt: str) -> str:
+        return generate_with_ollama(
+            model, system_prompt, user_prompt, context_tokens, temperature, 4096,
+        )
+
+    return generate_hierarchical_chunked(
+        extract_fn, reduce_fn, transcript, language, chunk_chars, reduce_chars,
+    )
 
 
 def generate_with_gemini_chunked(model: str, transcript: str, language: str, chunk_chars: int = 15000) -> str:
@@ -212,14 +308,17 @@ def summarize_single_transcript(
     output_path: Path,
     language: str | None = None,
     provider: str = "auto",
-    primary_local_model: str = DEFAULT_PRIMARY_LOCAL,
-    secondary_local_model: str = DEFAULT_SECONDARY_LOCAL,
     openai_model: str = DEFAULT_OPENAI_MODEL,
     anthropic_model: str = DEFAULT_ANTHROPIC_MODEL,
     gemini_model: str = DEFAULT_GEMINI_MODEL,
     use_chunking: bool = False,
     chunk_chars: int = 3000,
     gemini_chunk_chars: int = 15000,
+    local_model: str = DEFAULT_PRIMARY_LOCAL,
+    local_fallback_model: str = DEFAULT_SECONDARY_LOCAL,
+    local_context: int = 32768,
+    local_temperature: float = 0.1,
+    local_reduce_chars: int = 40000,
 ) -> bool:
     if not transcript_path.exists():
         print(f"Error: Transcript file not found: {transcript_path}")
@@ -273,26 +372,28 @@ def summarize_single_transcript(
                 print(f"OpenAI API failed: {e}")
 
     if summary is None and provider in ("auto", "ollama"):
-        ollama_client = OpenAI(
-            base_url=OLLAMA_BASE_URL,
-            api_key="ollama",
-        )
         generate_local = (
-            (lambda m: generate_with_ollama_chunked(ollama_client, m, transcript, language, chunk_chars))
+            (lambda m: generate_with_ollama_chunked(
+                m, transcript, language, chunk_chars,
+                local_reduce_chars, local_context, local_temperature,
+            ))
             if use_chunking
-            else (lambda m: generate_with_openai_compatible(ollama_client, m, transcript, language))
+            else (lambda m: generate_with_ollama(
+                m, build_system_prompt(language), build_user_prompt(transcript),
+                local_context, local_temperature,
+            ))
         )
         try:
-            print(f"Generating summary with local Ollama ({primary_local_model}) for {transcript_path.name}...")
-            summary = generate_local(primary_local_model)
+            print(f"Generating summary with local Ollama ({local_model}) for {transcript_path.name}...")
+            summary = generate_local(local_model)
         except Exception as e:
-            print(f"Ollama primary model ({primary_local_model}) failed: {e}")
+            print(f"Ollama primary model ({local_model}) failed: {e}")
             if provider == "auto":
                 try:
-                    print(f"Falling back to secondary local Ollama model ({secondary_local_model})...")
-                    summary = generate_local(secondary_local_model)
+                    print(f"Falling back to secondary local Ollama model ({local_fallback_model})...")
+                    summary = generate_local(local_fallback_model)
                 except Exception as e2:
-                    print(f"Ollama secondary model ({secondary_local_model}) failed: {e2}")
+                    print(f"Ollama secondary model ({local_fallback_model}) failed: {e2}")
 
     if summary is None:
         print(f"Error: All summary providers failed for {transcript_path.name}.")
@@ -315,6 +416,11 @@ def summarize_transcripts(
     use_chunking: bool = False,
     chunk_chars: int = 3000,
     gemini_chunk_chars: int = 15000,
+    local_model: str = DEFAULT_PRIMARY_LOCAL,
+    local_fallback_model: str = DEFAULT_SECONDARY_LOCAL,
+    local_context: int = 32768,
+    local_temperature: float = 0.1,
+    local_reduce_chars: int = 40000,
 ) -> list[Path]:
     target = Path(input_path)
     if not target.exists():
@@ -352,6 +458,11 @@ def summarize_transcripts(
             use_chunking=use_chunking,
             chunk_chars=chunk_chars,
             gemini_chunk_chars=gemini_chunk_chars,
+            local_model=local_model,
+            local_fallback_model=local_fallback_model,
+            local_context=local_context,
+            local_temperature=local_temperature,
+            local_reduce_chars=local_reduce_chars,
         )
         if success:
             results.append(out_file)
@@ -407,6 +518,34 @@ def main():
         help="Max characters per chunk when --chunked is used (default: 3000; lower for less VRAM)",
     )
     parser.add_argument(
+        "--local-model",
+        default=DEFAULT_PRIMARY_LOCAL,
+        help=f"Ollama model to use (default: {DEFAULT_PRIMARY_LOCAL})",
+    )
+    parser.add_argument(
+        "--local-fallback-model",
+        default=DEFAULT_SECONDARY_LOCAL,
+        help=f"Ollama fallback model used by auto mode (default: {DEFAULT_SECONDARY_LOCAL})",
+    )
+    parser.add_argument(
+        "--local-context",
+        type=int,
+        default=32768,
+        help="Ollama context window in tokens (default: 32768)",
+    )
+    parser.add_argument(
+        "--local-temperature",
+        type=float,
+        default=0.1,
+        help="Ollama sampling temperature (default: 0.1)",
+    )
+    parser.add_argument(
+        "--local-reduce-chars",
+        type=int,
+        default=40000,
+        help="Maximum note characters per hierarchical reduction group (default: 40000)",
+    )
+    parser.add_argument(
         "--gemini-chunk-chars",
         type=int,
         default=15000,
@@ -426,6 +565,11 @@ def main():
         use_chunking=args.chunked,
         chunk_chars=args.chunk_chars,
         gemini_chunk_chars=args.gemini_chunk_chars,
+        local_model=args.local_model,
+        local_fallback_model=args.local_fallback_model,
+        local_context=args.local_context,
+        local_temperature=args.local_temperature,
+        local_reduce_chars=args.local_reduce_chars,
     )
 
 

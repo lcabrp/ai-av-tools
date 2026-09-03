@@ -150,7 +150,7 @@ main.py              # Main end-to-end pipeline CLI
 
 ## Models Supported
 
-- **Transcription**: OpenAI Whisper (local CUDA-accelerated, supports all audio and video formats; default model `medium`)
+- **Transcription**: faster-whisper (local CUDA-accelerated, supports all audio and video formats; default model `medium`, auto FP16 on modern RTX / INT8-FP16 on older GPUs)
 - **Summarization**:
   - **Default**: Google Gemini `gemini-flash-latest` (best detail retention in internal benchmarks; auto-chunks long transcripts)
   - **Local**: Ollama `gemma4:12b`, `gemma4:e4b`

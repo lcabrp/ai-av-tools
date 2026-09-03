@@ -1,10 +1,9 @@
 import argparse
-import os
-import shutil
 import sys
 from pathlib import Path
 
-import whisper
+import torch
+from faster_whisper import WhisperModel
 
 MEDIA_EXTENSIONS = {
     ".wav", ".mp3", ".m4a", ".flac", ".aac", ".ogg", ".wma",
@@ -12,32 +11,41 @@ MEDIA_EXTENSIONS = {
 }
 
 
-def ensure_ffmpeg_in_path():
-    if shutil.which("ffmpeg"):
-        return
-    winget_dir = Path.home() / "AppData/Local/Microsoft/WinGet"
-    if winget_dir.exists():
-        ffmpeg_execs = list(winget_dir.rglob("ffmpeg.exe"))
-        if ffmpeg_execs:
-            ffmpeg_bin_dir = str(ffmpeg_execs[0].parent)
-            os.environ["PATH"] = ffmpeg_bin_dir + os.pathsep + os.environ.get("PATH", "")
-            print(f"Added FFmpeg to PATH: {ffmpeg_bin_dir}")
-            return
-
-
-ensure_ffmpeg_in_path()
-
-
 def is_media_file(path: Path) -> bool:
 
     return path.is_file() and path.suffix.lower() in MEDIA_EXTENSIONS
 
 
-def transcribe_file(file_path: Path, model: whisper.Whisper, output_dir: Path) -> Path:
+def resolve_device(requested: str) -> str:
+    if requested in ("cuda", "cpu"):
+        if requested == "cuda" and not torch.cuda.is_available():
+            print("Warning: CUDA requested but not available to torch; falling back to CPU.")
+            return "cpu"
+        return requested
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def default_compute_type(device: str) -> str:
+    """Pick the fastest compute type for the device based on benchmark findings.
+
+    Ampere and newer (compute capability >= 8.0) have fast FP16 tensor cores;
+    older architectures (e.g. T1000, compute capability 7.5) run ~3x faster
+    with INT8. See Docs/whisper-benchmark.md.
+    """
+    if device != "cuda":
+        return "int8"
+    major, _ = torch.cuda.get_device_capability(0)
+    if major >= 8:
+        return "float16"
+    return "int8_float16"
+
+
+def transcribe_file(file_path: Path, model: WhisperModel, output_dir: Path,
+                    language: str | None = None) -> Path:
     print(f"\nTranscribing: {file_path.name}")
-    result = model.transcribe(str(file_path))
-    transcript = result["text"].strip()
-    language = result.get("language", "unknown")
+    segments, info = model.transcribe(str(file_path), language=language, beam_size=5)
+    transcript = " ".join(seg.text for seg in segments).strip()
+    detected = info.language
 
     output_dir.mkdir(parents=True, exist_ok=True)
     file_stem = file_path.stem
@@ -45,14 +53,17 @@ def transcribe_file(file_path: Path, model: whisper.Whisper, output_dir: Path) -
     output_file.write_text(transcript, encoding="utf-8")
 
     lang_file = output_dir / f"{file_stem}.lang"
-    lang_file.write_text(language, encoding="utf-8")
+    lang_file.write_text(detected, encoding="utf-8")
 
     print(f"Transcript saved to: {output_file}")
-    print(f"Detected language: {language}")
+    print(f"Detected language: {detected} (probability {info.language_probability:.3f})")
     return output_file
 
 
-def transcribe_media(input_path: str, model_size: str = "medium", output_dir: str = "Output/transcripts") -> list[Path]:
+def transcribe_media(input_path: str, model_size: str = "medium",
+                     output_dir: str = "Output/transcripts",
+                     device: str = "auto", compute_type: str = "auto",
+                     language: str | None = None) -> list[Path]:
     target = Path(input_path)
     if not target.exists():
         print(f"Error: Path not found: {input_path}")
@@ -72,19 +83,26 @@ def transcribe_media(input_path: str, model_size: str = "medium", output_dir: st
         print(f"Error: Invalid path: {input_path}")
         sys.exit(1)
 
-    print(f"Loading Whisper model '{model_size}'...")
-    model = whisper.load_model(model_size)
+    resolved_device = resolve_device(device)
+    resolved_compute = compute_type if compute_type != "auto" else default_compute_type(resolved_device)
+    if resolved_device == "cuda":
+        gpu = torch.cuda.get_device_name(0)
+        capability = torch.cuda.get_device_capability(0)
+        print(f"GPU: {gpu} (compute capability {capability[0]}.{capability[1]})")
+    print(f"Loading faster-whisper model '{model_size}' (device={resolved_device}, "
+          f"compute_type={resolved_compute})...")
+    model = WhisperModel(model_size, device=resolved_device, compute_type=resolved_compute)
 
     generated = []
     for f in files:
-        txt_path = transcribe_file(f, model, output_path)
+        txt_path = transcribe_file(f, model, output_path, language)
         generated.append(txt_path)
 
     return generated
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Transcribe audio/video files using OpenAI Whisper.")
+    parser = argparse.ArgumentParser(description="Transcribe audio/video files using faster-whisper.")
     parser.add_argument("input", help="Path to audio/video file or directory")
     parser.add_argument(
         "--model",
@@ -97,11 +115,28 @@ def main():
         default="Output/transcripts",
         help="Directory to save transcripts (default: Output/transcripts)",
     )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        choices=["auto", "cuda", "cpu"],
+        help="Inference device (default: auto = cuda when available)",
+    )
+    parser.add_argument(
+        "--compute-type",
+        default="auto",
+        help="CTranslate2 compute type (default: auto = float16 on compute "
+             "capability >= 8.0, int8_float16 on older GPUs, int8 on CPU)",
+    )
+    parser.add_argument(
+        "--language",
+        default=None,
+        help="Force language code (e.g. 'es'); default is auto-detect",
+    )
     args = parser.parse_args()
 
-    transcribe_media(args.input, args.model, args.output_dir)
+    transcribe_media(args.input, args.model, args.output_dir, args.device,
+                     args.compute_type, args.language)
 
 
 if __name__ == "__main__":
     main()
-

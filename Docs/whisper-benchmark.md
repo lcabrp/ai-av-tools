@@ -1,8 +1,9 @@
 # Whisper Transcription Benchmark: openai-whisper vs faster-whisper
 
-Why this exists: `scripts/Python/transcribe.py` uses openai-whisper `medium` because `base` was
-not accurate enough for real conversations. `faster-whisper` claims ~4x speedups but initially
-appeared no faster here — that turned out to be a flawed test (see "The CPU trap" below).
+Why this exists: `scripts/Python/transcribe.py` uses `faster-whisper` `medium` (switched from
+openai-whisper after these benchmarks) because `base` was not accurate enough for real
+conversations. `faster-whisper` claims ~4x speedups but initially appeared no faster here —
+that turned out to be a flawed test (see "The CPU trap" below).
 
 Script: `scripts/Python/benchmark_transcription.py` (run with `uv run`).
 
@@ -129,6 +130,35 @@ exceeds that and needs `num_ctx` ≥16384 or batched hierarchical reduce.
 Decision: keep **OpenAI (`gpt-5.6-luna`) and Gemini (`gemini-flash-latest`)** for production summaries.
 Local Gemma is retained for experimentation/offline fallback only.
 
+## Local SLM experiment — 2026-09 (AGP FAQ call)
+
+Question: can a small local model do this job and save money? Test: the 98k-char Spanish FAQ
+transcript on the RTX 4070 with an improved pipeline (native Ollama endpoint, temperature 0.1,
+32K context for reductions, hierarchical map-reduce, attribution-preserving prompts).
+Results in `Docs/local-summary-benchmark-results.csv`, outputs in `Output/local-summary-benchmarks/`.
+
+| Model | Time | Words | Named cases (/17) | Score |
+|---|---|---:|---:|---:|
+| `ministral-3:3b` | 6.4 min | 1,448 | 2 | 2/10 |
+| `phi4-mini` | 4.4 min | 355 | 0 | 2/10 |
+| `alibayram/smollm3` (community package) | 5.0 min | 684 | 0 | 1/10 |
+| `gemma4:12b` (old pipeline) | 38.5 min | 0 | 0 | fail |
+| `qwen3.5:9b` (old pipeline) | 26.9 min | 375 | — | fail |
+
+Findings:
+
+- All local runs lost nearly all participant attribution, numbers, and dated action items.
+  Ministral kept 2 of 17 named cases; Phi-mini and SmolLM3 kept none.
+- SmolLM3 invented a nonexistent 4-pillar "PDD" program; Ministral fossilized ASR errors
+  ("chisuit", "micho") into entities and duplicated sections (map-reduce stitching artifacts).
+- Longer output did not mean better recall: Ministral's 1,448 words still missed all metrics
+  and every dated commitment.
+- Pipeline lesson: alternating `num_ctx` per call forces Ollama model reloads — use one uniform
+  context; cap extraction output so reductions stay shallow (40k-char groups → 1 level, 3 groups).
+
+Verdict: local SLMs are **not viable replacements** for cloud summaries on dense meeting content.
+They stay as offline fallback only. Production remains Gemini/Luna.
+
 ## The CPU trap (what went wrong initially)
 
 The first "benchmark" used bare `pip install` + `python` instead of `uv`. That installed
@@ -184,8 +214,9 @@ When comparing GPUs, note especially:
   while later runs use the local cache
 - use the same audio, 300-second slice, language, model, and beam size for meaningful comparisons
 
-## Follow-up
+## Follow-up (done)
 
-Switch `scripts/Python/transcribe.py` from openai-whisper to faster-whisper, selecting FP16 on
-modern RTX GPUs and INT8/FP16 on the T1000. Summarization stays on Gemini/OpenAI (best detail
-retention); local Gemma is for experimentation only.
+`scripts/Python/transcribe.py` now uses faster-whisper, auto-selecting FP16 on GPUs with
+compute capability >= 8.0 and INT8/FP16 on older GPUs such as the T1000
+(`--compute-type` / `--device` override when needed). Summarization stays on Gemini/OpenAI
+(best detail retention); local SLMs are for experimentation only.
