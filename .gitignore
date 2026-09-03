@@ -1,9 +1,11 @@
 # Environment variables
 .env
 
-# Audio and Video files (may exceed 100MB)
-Docs/Audio/
-Docs/Video/
+# Audio and Video file contents (may exceed 100MB); folders are kept via .gitkeep
+Docs/Audio/*
+Docs/Video/*
+!Docs/Audio/.gitkeep
+!Docs/Video/.gitkeep
 
 
 # Python
