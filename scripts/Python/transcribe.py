@@ -1,9 +1,15 @@
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import torch
 from faster_whisper import WhisperModel
+
+try:
+    from scripts.Python.ops_log import log_operation
+except ImportError:  # run directly as a script: siblings are top-level on sys.path
+    from ops_log import log_operation
 
 MEDIA_EXTENSIONS = {
     ".wav", ".mp3", ".m4a", ".flac", ".aac", ".ogg", ".wma",
@@ -91,12 +97,40 @@ def transcribe_media(input_path: str, model_size: str = "medium",
         print(f"GPU: {gpu} (compute capability {capability[0]}.{capability[1]})")
     print(f"Loading faster-whisper model '{model_size}' (device={resolved_device}, "
           f"compute_type={resolved_compute})...")
+    t_load_start = time.perf_counter()
     model = WhisperModel(model_size, device=resolved_device, compute_type=resolved_compute)
+    load_seconds = time.perf_counter() - t_load_start
+    config = f"faster-whisper {model_size} {resolved_compute} ({resolved_device})"
 
     generated = []
     for f in files:
-        txt_path = transcribe_file(f, model, output_path, language)
-        generated.append(txt_path)
+        t0 = time.perf_counter()
+        status = "ok"
+        txt_path = None
+        try:
+            txt_path = transcribe_file(f, model, output_path, language)
+        except Exception as e:
+            status = f"{type(e).__name__}: {e}"
+            print(f"Error transcribing {f.name}: {status}")
+        elapsed = time.perf_counter() - t0
+        chars = None
+        if txt_path is not None:
+            generated.append(txt_path)
+            try:
+                chars = len(txt_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        log_operation(
+            operation="transcribe",
+            input_file=f.name,
+            config=config,
+            elapsed_seconds=elapsed,
+            output_file=txt_path.name if txt_path is not None else "",
+            input_chars=None,
+            output_chars=chars,
+            load_seconds=load_seconds,
+            status=status,
+        )
 
     return generated
 

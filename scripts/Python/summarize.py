@@ -3,11 +3,17 @@ import json
 import os
 import sys
 import textwrap
+import time
 import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
 from openai import OpenAI
+
+try:
+    from scripts.Python.ops_log import log_operation
+except ImportError:  # run directly as a script: siblings are top-level on sys.path
+    from ops_log import log_operation
 
 # Explicit path avoids dotenv's stack-frame lookup, which is unreliable when
 # this module is imported from different entry points (e.g. compare_models.py).
@@ -337,6 +343,8 @@ def summarize_single_transcript(
             language = "english"
 
     summary = None
+    used_config = ""
+    t_start = time.perf_counter()
 
     # gemini-flash-latest is the default: best detail retention in benchmarks. Long
     # transcripts are automatically chunked (map-reduce) since that measurably improved
@@ -346,9 +354,11 @@ def summarize_single_transcript(
             if len(transcript) > gemini_chunk_chars:
                 print(f"Generating summary with Gemini ({gemini_model}), chunked (long transcript)...")
                 summary = generate_with_gemini_chunked(gemini_model, transcript, language, gemini_chunk_chars)
+                used_config = f"gemini/{gemini_model} chunked({gemini_chunk_chars})"
             else:
                 print(f"Generating summary with Gemini ({gemini_model})...")
                 summary = generate_with_gemini(gemini_model, transcript, language)
+                used_config = f"gemini/{gemini_model} single-shot"
         except Exception as e:
             print(f"Gemini API failed: {e}")
 
@@ -356,6 +366,7 @@ def summarize_single_transcript(
         try:
             print(f"Generating summary with Anthropic ({anthropic_model})...")
             summary = generate_with_anthropic(anthropic_model, transcript, language)
+            used_config = f"anthropic/{anthropic_model}"
         except Exception as e:
             print(f"Anthropic API failed: {e}")
 
@@ -368,6 +379,7 @@ def summarize_single_transcript(
                 print(f"Generating summary with OpenAI ({openai_model})...")
                 openai_client = OpenAI(api_key=api_key)
                 summary = generate_with_openai_compatible(openai_client, openai_model, transcript, language)
+                used_config = f"openai/{openai_model}"
             except Exception as e:
                 print(f"OpenAI API failed: {e}")
 
@@ -383,25 +395,50 @@ def summarize_single_transcript(
                 local_context, local_temperature,
             ))
         )
+        mode = f"chunked({chunk_chars})" if use_chunking else "single-shot"
         try:
             print(f"Generating summary with local Ollama ({local_model}) for {transcript_path.name}...")
             summary = generate_local(local_model)
+            used_config = f"ollama/{local_model} {mode}"
         except Exception as e:
             print(f"Ollama primary model ({local_model}) failed: {e}")
             if provider == "auto":
                 try:
                     print(f"Falling back to secondary local Ollama model ({local_fallback_model})...")
                     summary = generate_local(local_fallback_model)
+                    used_config = f"ollama/{local_fallback_model} {mode} (fallback)"
                 except Exception as e2:
                     print(f"Ollama secondary model ({local_fallback_model}) failed: {e2}")
 
+    elapsed = time.perf_counter() - t_start
+
     if summary is None:
         print(f"Error: All summary providers failed for {transcript_path.name}.")
+        log_operation(
+            operation="summarize",
+            input_file=transcript_path.name,
+            config=f"{provider} (all failed)",
+            elapsed_seconds=elapsed,
+            output_file="",
+            input_chars=len(transcript),
+            output_chars=None,
+            status="failed",
+        )
         return False
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(summary, encoding="utf-8")
     print(f"Summary saved to: {output_path}")
+    log_operation(
+        operation="summarize",
+        input_file=transcript_path.name,
+        config=used_config or provider,
+        elapsed_seconds=elapsed,
+        output_file=output_path.name,
+        input_chars=len(transcript),
+        output_chars=len(summary),
+        status="ok",
+    )
     return True
 
 
