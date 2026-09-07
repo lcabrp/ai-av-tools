@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from scripts.Python.summarize import summarize_transcripts
 from scripts.Python.transcribe import transcribe_media
+from scripts.Python.youtube_transcript import fetch_youtube_transcript, is_youtube_input
 
 
 def process_pipeline(
@@ -23,12 +24,20 @@ def process_pipeline(
     chunk_chars: int = 3000,
     gemini_chunk_chars: int = 15000,
 ):
-    print("=== Step 1: Transcribing audio/video ===")
-    transcript_files = transcribe_media(
-        input_path=input_path,
-        model_size=whisper_model,
-        output_dir=transcripts_dir,
-    )
+    if is_youtube_input(input_path):
+        print("=== Step 1: Fetching YouTube transcript ===")
+        transcript_files = fetch_youtube_transcript(
+            url_or_id=input_path,
+            output_dir=transcripts_dir,
+            language=language,
+        )
+    else:
+        print("=== Step 1: Transcribing audio/video ===")
+        transcript_files = transcribe_media(
+            input_path=input_path,
+            model_size=whisper_model,
+            output_dir=transcripts_dir,
+        )
 
     if not transcript_files:
         print("No transcripts generated. Exiting pipeline.")
@@ -54,14 +63,14 @@ def process_pipeline(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="End-to-end media transcription and summarization pipeline."
+        description="End-to-end media or YouTube video transcription and summarization pipeline."
     )
-    parser.add_argument("input", help="Path to audio/video file or directory")
+    parser.add_argument("input", help="Path to audio/video file, directory, or YouTube URL/ID")
     parser.add_argument(
         "--whisper-model",
         default="medium",
         choices=["tiny", "base", "small", "medium", "large"],
-        help="Whisper model size for transcription (default: medium)",
+        help="Whisper model size for local media transcription (default: medium)",
     )
     parser.add_argument(
         "--provider",
@@ -87,7 +96,7 @@ def main():
     parser.add_argument(
         "--language",
         default=None,
-        help="Target output language for summary (default: auto-detect or English)",
+        help="Target output language for summary / transcript (default: auto-detect or English)",
     )
     parser.add_argument(
         "--transcripts-dir",
@@ -137,8 +146,5 @@ def main():
     )
 
 
-
-
 if __name__ == "__main__":
     main()
-

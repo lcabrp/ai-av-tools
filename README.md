@@ -39,15 +39,35 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 ### Complete End-to-End Pipeline (Transcribe + Summarize)
 
-Process a single video/audio file or an entire directory of media files:
+Process a YouTube video, a single video/audio file, or an entire directory of media files:
 
 ```bash
-# Process a video or audio file (or folder) with smart automatic model fallback
+# Process a YouTube video directly (extracts subtitles in seconds without GPU compute, then summarizes)
+uv run main.py "https://youtu.be/HzGOWq5UyjY" --provider auto
+
+# Process a local video or audio file (or folder) with smart automatic model fallback
 uv run main.py Docs/Video/JaimeHiguera
 
 # Specify whisper model and summary provider explicitly (medium is the default; more accurate than base)
 uv run main.py Docs/Video/JaimeHiguera --whisper-model medium --provider auto
 ```
+
+### YouTube Video Transcripts
+
+Instantly extract YouTube subtitles/transcripts without needing local GPU audio transcription:
+
+```bash
+# Standalone YouTube transcript extraction
+uv run scripts/Python/youtube_transcript.py "https://youtu.be/HzGOWq5UyjY"
+
+# Optional: specify custom output directory or language
+uv run scripts/Python/youtube_transcript.py "https://youtu.be/HzGOWq5UyjY" --output-dir Output/transcripts --language es
+```
+
+This generates:
+- `<Title> [<ID>].txt`: Continuous plain text formatted for LLM summarization.
+- `<Title> [<ID>]_timestamps.txt`: Human-readable transcript with `[MM:SS]` timestamps.
+- `<Title> [<ID>].lang`: Detected language metadata.
 
 ### Transcribe Audio/Video
 
@@ -120,8 +140,8 @@ uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider olla
 2. Run a chunk and check `ollama ps` — it reports a GPU/CPU % split. Any CPU % means the current
    chunk size (prompt + context) doesn't fully fit in VRAM and is slowing down.
 3. Adjust `--chunk-chars` up/down until `ollama ps` shows ~100% GPU, then back off ~10-15% for safety.
-4. Rough starting points by VRAM: **8GB** → `gemma4:12b` at ~3000-4000 chars; **6GB** → prefer
-   `gemma4:e4b` at ~2000-2500 chars; **4GB** → `gemma4:e4b` only, ~1000-1500 chars (or just rely on
+4. Rough starting points by VRAM: **8GB** -> `gemma4:12b` at ~3000-4000 chars; **6GB** -> prefer
+   `gemma4:e4b` at ~2000-2500 chars; **4GB** -> `gemma4:e4b` only, ~1000-1500 chars (or just rely on
    Gemini instead of local).
 
 Bigger chunks aren't automatically better for local models — in testing, `gemma4:12b` on an 8GB GPU
@@ -144,13 +164,15 @@ Docs/Video/          # Video files (not tracked)
 Output/
   transcripts/       # Generated transcripts
   *.md               # Markdown summaries
-scripts/Python/      # Transcribe, summarize, and compare_models scripts
+scripts/Python/      # Transcribe, youtube_transcript, summarize, and compare_models scripts
 main.py              # Main end-to-end pipeline CLI
 ```
 
 ## Models Supported
 
-- **Transcription**: faster-whisper (local CUDA-accelerated, supports all audio and video formats; default model `medium`, auto FP16 on modern RTX / INT8-FP16 on older GPUs)
+- **Transcription**: 
+  - **YouTube**: `youtube-transcript-api` (instant subtitle extraction, zero-GPU overhead)
+  - **Local Media**: faster-whisper (local CUDA-accelerated, supports all audio and video formats; default model `medium`, auto FP16 on modern RTX / INT8-FP16 on older GPUs)
 - **Summarization**:
   - **Default**: Google Gemini `gemini-flash-latest` (best detail retention in internal benchmarks; auto-chunks long transcripts)
   - **Local**: Ollama `gemma4:12b`, `gemma4:e4b`
