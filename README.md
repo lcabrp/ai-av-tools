@@ -69,6 +69,11 @@ This generates:
 - `<Title> [<ID>]_timestamps.txt`: Human-readable transcript with `[MM:SS]` timestamps.
 - `<Title> [<ID>].lang`: Detected language metadata.
 
+If a video has subtitles disabled, `main.py` automatically falls back to downloading the
+audio with `yt-dlp` (saved under `Docs/Audio/youtube/`, skipped if already downloaded) and
+transcribing it locally with faster-whisper before summarizing — so the end-to-end pipeline
+works for any YouTube URL.
+
 ### Transcribe Audio/Video
 
 Supports `.wav`, `.mp3`, `.m4a`, `.mp4`, `.mov`, `.mkv`, etc., for single files or entire folders:
@@ -105,6 +110,11 @@ uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider gemi
 # Override summary language
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --language english
 ```
+
+Summaries are saved as `Output/<name>_summary_<provider>.md` (e.g. `_summary_gemini.md`,
+`_summary_openai_luna.md`) so results from different providers stay side-by-side instead of
+overwriting each other. In `--provider auto` mode the tag reflects whichever provider actually
+succeeded. Passing an explicit `--output` file path overrides the tag.
 
 #### Default provider: Gemini, with automatic chunking
 
@@ -163,7 +173,7 @@ Docs/Audio/          # Audio files (not tracked)
 Docs/Video/          # Video files (not tracked)
 Output/
   transcripts/       # Generated transcripts
-  *.md               # Markdown summaries
+  *_summary_*.md     # Markdown summaries, tagged per provider
 scripts/Python/      # Transcribe, youtube_transcript, summarize, and compare_models scripts
 main.py              # Main end-to-end pipeline CLI
 ```

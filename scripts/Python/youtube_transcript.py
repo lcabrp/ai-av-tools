@@ -7,6 +7,11 @@ import urllib.request
 from pathlib import Path
 
 from youtube_transcript_api import YouTubeTranscriptApi
+from yt_dlp import YoutubeDL
+
+# Windows consoles default to cp1252, which crashes on emoji/CJK in video
+# titles (same fix as benchmark_transcription.py).
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 YOUTUBE_URL_PATTERNS = [
     r"(?:https?:\/\/)?(?:www\.)?youtu\.be\/([a-zA-Z0-9_-]{11})",
@@ -168,6 +173,56 @@ def fetch_youtube_transcript(
     lang_file.write_text(detected_lang, encoding="utf-8")
 
     return [output_file]
+
+
+def download_youtube_audio(
+    url_or_id: str,
+    output_dir: Path | str = "Docs/Audio/youtube",
+) -> Path | None:
+    """Download the best native audio stream of a YouTube video.
+
+    Used as a fallback when a video has no subtitles to fetch. Downloads the
+    native container (m4a/webm — no ffmpeg conversion needed; faster-whisper
+    decodes them directly) and skips re-downloading if a file for the same
+    video ID already exists.
+
+    Returns:
+      Path to the downloaded audio file, or None on failure.
+    """
+    video_id = extract_video_id(url_or_id)
+    if not video_id:
+        print(f"Error: Invalid YouTube URL or video ID: {url_or_id}")
+        return None
+
+    out_path = Path(output_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    # NOTE: match "*<id>*" (not "*<id>.*") — yt-dlp names files
+    # "<title> [<id>].<ext>", so the char after the ID is "]", not ".".
+    existing = sorted(f for f in out_path.glob(f"*{video_id}*") if f.is_file())
+    if existing:
+        print(f"Reusing existing download: {existing[0]}")
+        return existing[0]
+
+    print(f"\nDownloading YouTube audio for video ID: {video_id}")
+    opts = {
+        "format": "bestaudio/best",
+        "outtmpl": str(out_path / "%(title)s [%(id)s].%(ext)s"),
+        "noplaylist": True,
+    }
+    try:
+        with YoutubeDL(opts) as ydl:
+            ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+    except Exception as e:
+        print(f"Error downloading YouTube audio: {e}")
+        return None
+
+    downloaded = sorted(f for f in out_path.glob(f"*{video_id}*") if f.is_file())
+    if not downloaded:
+        print(f"Download finished but no audio file found for video: {video_id}")
+        return None
+    print(f"Audio saved to: {downloaded[0]}")
+    return downloaded[0]
 
 
 def main():

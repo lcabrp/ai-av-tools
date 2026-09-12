@@ -110,6 +110,31 @@ It is slower than the 12 GB RTX 4070 as expected, but confirms the tensor-core p
 `float16` beats `int8_float16` on Ampere/Ada, while the non-tensor-core T1000 prefers `int8_float16`.
 Results are in `Docs/transcription-benchmark-results.csv` (machine `ZBookFuryG8`).
 
+## RTX A2000 Laptop comparison
+
+System: ZBookPowerG9-03, RTX A2000 8GB Laptop GPU (Ampere, compute capability 8.6, 20 SMs),
+driver 595.95, torch 2.6.0+cu124, Python 3.13.12, openai-whisper 20250625, faster-whisper 1.2.1.
+Same first 300 seconds of the same Spanish recording (local filename
+`KTA_Institute_TaxPreparer_2026-08-26.mp3`; identical character counts to the other machines —
+e.g. 3794 chars on faster-whisper `float16`, 3555 on openai-whisper — confirm same audio content).
+
+| Backend | Config | T1000 | RTX 4070 | RTX A4000 | RTX A2000 |
+|---|---|---:|---:|---:|---:|
+| openai-whisper medium | fp16 | 109.2s | 20.9s | 33.2s | 26.9s |
+| faster-whisper medium | float16 | 119.9s | 10.9s | **15.6s** | 20.1s |
+| faster-whisper medium | int8_float16 | 40.9s | 10.6s | 18.2s | **19.7s** |
+| faster-whisper medium | float32 | — | 13.7s | 22.5s | 35.8s |
+
+The A2000 is ~6.0x faster than the T1000 on `float16` and ~4.1x on openai-whisper `medium`.
+It sits where expected in the lineup: ~1.9x slower than the RTX 4070 and ~1.26x slower than the
+A4000 (best-config comparison), ~2.1x faster than the T1000. On this machine faster-whisper FP16
+(20.1s) is ~1.34x faster than openai-whisper FP16 (26.9s).
+Note: `int8_float16` (19.7s) edged out `float16` (20.1s) by ~0.4s — effectively a tie, but a mild
+break from the tensor-core pattern seen on the RTX 4070/A4000 where `float16` won. FP16 remains the
+conservative default for compute capability >= 8.0 since the gap is within run-to-run noise and it
+avoids quantization.
+Results are in `Docs/transcription-benchmark-results.csv` (machine `ZBookPowerG9-03`).
+
 ## Summarization benchmark — 2026-08 (Unitec webinars)
 
 Two Spanish webinars (~91-99k chars / ~16.6k words) were transcribed with Whisper `medium` and

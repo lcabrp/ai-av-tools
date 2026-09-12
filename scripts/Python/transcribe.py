@@ -6,6 +6,10 @@ from pathlib import Path
 import torch
 from faster_whisper import WhisperModel
 
+# Windows consoles default to cp1252, which crashes on emoji/CJK in file
+# names (same fix as benchmark_transcription.py).
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 try:
     from scripts.Python.ops_log import log_operation
 except ImportError:  # run directly as a script: siblings are top-level on sys.path

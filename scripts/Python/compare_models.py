@@ -2,6 +2,10 @@ import argparse
 import sys
 from pathlib import Path
 
+# Windows consoles default to cp1252, which crashes on emoji/CJK in file
+# names (same fix as benchmark_transcription.py).
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Add project root to sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 

@@ -15,6 +15,10 @@ try:
 except ImportError:  # run directly as a script: siblings are top-level on sys.path
     from ops_log import log_operation
 
+# Windows consoles default to cp1252, which crashes on emoji/CJK in file
+# names (same fix as benchmark_transcription.py).
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Explicit path avoids dotenv's stack-frame lookup, which is unreliable when
 # this module is imported from different entry points (e.g. compare_models.py).
 load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent.parent / ".env")
@@ -309,6 +313,19 @@ def generate_with_gemini(model: str, transcript: str, language: str) -> str:
     return response.text
 
 
+def provider_tag(provider: str, model: str | None = None) -> str:
+    """Short filename tag identifying the provider (and model variant for OpenAI).
+
+    Examples: gemini, anthropic, openai_luna, openai_terra, ollama.
+    Keeps per-provider summaries side-by-side instead of overwriting each other.
+    """
+    if provider == "openai" and model:
+        # gpt-5.6-luna -> openai_luna (drop the generic gpt-x.y prefix)
+        variant = model.split("-")[-1]
+        return f"openai_{variant}"
+    return provider
+
+
 def summarize_single_transcript(
     transcript_path: Path,
     output_path: Path,
@@ -335,6 +352,18 @@ def summarize_single_transcript(
         print(f"Warning: Transcript {transcript_path.name} is empty. Skipping.")
         return False
 
+    # Tag the default output name with the provider so different providers'
+    # summaries coexist instead of overwriting each other. Explicit --output
+    # file paths are used as-is. "auto" resolves to whichever provider succeeds.
+    if output_path.name == f"{transcript_path.stem}_summary.md":
+        def _tag_output(resolved_provider: str, resolved_model: str | None) -> None:
+            nonlocal output_path
+            output_path = output_path.with_name(
+                f"{transcript_path.stem}_summary_{provider_tag(resolved_provider, resolved_model)}.md"
+            )
+    else:
+        _tag_output = lambda rp, rm: None
+
     if not language:
         lang_file = transcript_path.with_suffix(".lang")
         if lang_file.exists():
@@ -359,6 +388,7 @@ def summarize_single_transcript(
                 print(f"Generating summary with Gemini ({gemini_model})...")
                 summary = generate_with_gemini(gemini_model, transcript, language)
                 used_config = f"gemini/{gemini_model} single-shot"
+            _tag_output("gemini", gemini_model)
         except Exception as e:
             print(f"Gemini API failed: {e}")
 
@@ -367,6 +397,7 @@ def summarize_single_transcript(
             print(f"Generating summary with Anthropic ({anthropic_model})...")
             summary = generate_with_anthropic(anthropic_model, transcript, language)
             used_config = f"anthropic/{anthropic_model}"
+            _tag_output("anthropic", anthropic_model)
         except Exception as e:
             print(f"Anthropic API failed: {e}")
 
@@ -380,6 +411,7 @@ def summarize_single_transcript(
                 openai_client = OpenAI(api_key=api_key)
                 summary = generate_with_openai_compatible(openai_client, openai_model, transcript, language)
                 used_config = f"openai/{openai_model}"
+                _tag_output("openai", openai_model)
             except Exception as e:
                 print(f"OpenAI API failed: {e}")
 
@@ -400,6 +432,7 @@ def summarize_single_transcript(
             print(f"Generating summary with local Ollama ({local_model}) for {transcript_path.name}...")
             summary = generate_local(local_model)
             used_config = f"ollama/{local_model} {mode}"
+            _tag_output("ollama", local_model)
         except Exception as e:
             print(f"Ollama primary model ({local_model}) failed: {e}")
             if provider == "auto":
@@ -407,6 +440,7 @@ def summarize_single_transcript(
                     print(f"Falling back to secondary local Ollama model ({local_fallback_model})...")
                     summary = generate_local(local_fallback_model)
                     used_config = f"ollama/{local_fallback_model} {mode} (fallback)"
+                    _tag_output("ollama", local_fallback_model)
                 except Exception as e2:
                     print(f"Ollama secondary model ({local_fallback_model}) failed: {e2}")
 
@@ -513,7 +547,7 @@ def main():
     parser.add_argument(
         "--output",
         default=None,
-        help="Output markdown file path or directory (default: Output/<name>_summary.md)",
+        help="Output markdown file path or directory (default: Output/<name>_summary_<provider>.md)",
     )
     parser.add_argument(
         "--language",

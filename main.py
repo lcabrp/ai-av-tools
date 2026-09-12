@@ -2,12 +2,20 @@ import argparse
 import sys
 from pathlib import Path
 
+# Windows consoles default to cp1252, which crashes on emoji/CJK in video
+# titles (same fix as benchmark_transcription.py).
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Add project root to sys.path if needed
 sys.path.insert(0, str(Path(__file__).parent))
 
 from scripts.Python.summarize import summarize_transcripts
 from scripts.Python.transcribe import transcribe_media
-from scripts.Python.youtube_transcript import fetch_youtube_transcript, is_youtube_input
+from scripts.Python.youtube_transcript import (
+    download_youtube_audio,
+    fetch_youtube_transcript,
+    is_youtube_input,
+)
 
 
 def process_pipeline(
@@ -31,6 +39,18 @@ def process_pipeline(
             output_dir=transcripts_dir,
             language=language,
         )
+        if not transcript_files:
+            print("Subtitles unavailable; falling back to audio download + local transcription...")
+            audio_file = download_youtube_audio(input_path)
+            if audio_file is None:
+                print("No transcripts generated. Exiting pipeline.")
+                return
+            print("=== Step 1b: Transcribing downloaded audio ===")
+            transcript_files = transcribe_media(
+                input_path=str(audio_file),
+                model_size=whisper_model,
+                output_dir=transcripts_dir,
+            )
     else:
         print("=== Step 1: Transcribing audio/video ===")
         transcript_files = transcribe_media(
