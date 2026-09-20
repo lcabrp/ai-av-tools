@@ -135,6 +135,64 @@ conservative default for compute capability >= 8.0 since the gap is within run-t
 avoids quantization.
 Results are in `Docs/transcription-benchmark-results.csv` (machine `ZBookPowerG9-03`).
 
+## Intel Arc Pro B70 via OpenVINO — 2026-09-20
+
+System: HP-Z2-G9, Intel Arc Pro B70 dGPU (driver 32.0.101.8805) + i9-12900, **no NVIDIA
+GPU**. torch reports `cuda_available=False`, so the CUDA backends don't apply. The Intel path is
+OpenVINO (2026.4.0) + optimum-intel: export once with `optimum-cli`, then run
+`OVModelForSpeechSeq2Seq` on `GPU.1` (the Arc B70; `GPU.0` is the UHD 770 iGPU — verify with
+`Core().get_property(d, 'FULL_DEVICE_NAME')`). IPEX is not an option on Windows (no `win_amd64`
+wheels for >= 2.6).
+
+Audio: `MargaritaPasos_01.mp3` (96.5 min Spanish livestream) — a different file from the 300s
+reference slices, so cross-GPU comparison below uses throughput (audio-sec per wall-sec).
+
+| Slice | Transcribe | Throughput | Chars |
+|---|---|---:|---:|
+| 60s | 6.4s | 9.4x | 828 |
+| 300s | 32.7s | 9.2x | 4014 |
+| full 5789s | 805.8s (13.4 min) | 7.2x | 78,526 (`bench_output/openvino-whisper-medium-gpu1-full.txt`) |
+
+CPU baseline on the same machine (i9-12900, 60s slice): openai-whisper medium fp32 49.9s
+(852 chars), faster-whisper medium int8 26.2s (796 chars). The Arc B70 via OpenVINO is ~4x
+faster than the best CPU option with on-par quality (same opening sentence, similar char counts).
+
+Throughput lineup (300s-slice numbers, best faster-whisper config except Arc = OpenVINO):
+
+| GPU | Time | Throughput |
+|---|---|---:|
+| RTX 4070 | 10.6s | 28x |
+| RTX A4000 Laptop | 15.6s | 19x |
+| RTX A2000 Laptop | 19.7s | 15x |
+| RTX A1000 Laptop | 20.3s | 15x |
+| **Arc Pro B70** | **32.7s** | **9.2x** |
+| T1000 | 40.9s | 7.3x |
+
+The Arc B70 lands between the T1000 and the Ampere laptop parts — a viable transcription GPU,
+roughly 1.25x faster than the T1000's best config.
+
+Verdict: no meaningful gain — slower than every NVIDIA option already benchmarked, and it
+needs a separate OpenVINO pipeline outside `benchmark_transcription.py`/`transcribe.py`.
+Not worth adopting for transcription; staying with the NVIDIA lineup.
+
+Reproduce:
+
+```bash
+# one-time export (~3 GB of IR; keep the output dir, re-export is slow)
+uv run --with openvino --with "optimum[openvino]" optimum-cli export openvino \
+  --model openai/whisper-medium --task automatic-speech-recognition <ov-model-dir>
+
+# transcribe on the Arc dGPU (naive 30s non-overlapping chunks; timings are the point —
+# for production use chunking with overlap or the transformers chunked pipeline instead)
+uv run --with openvino --with "optimum[openvino]" --with librosa --with soundfile \
+  python bench_ov.py <audio> GPU.1
+```
+
+Caveats: the OV runs don't go through `benchmark_transcription.py` (CUDA-oriented script);
+their rows were appended to `Docs/transcription-benchmark-results.csv` manually with
+`backend=openvino-whisper`. The `attention_mask` warning during `generate()` is harmless for
+benchmark purposes (char counts match the other backends).
+
 ## Summarization benchmark — 2026-08 (Unitec webinars)
 
 Two Spanish webinars (~91-99k chars / ~16.6k words) were transcribed with Whisper `medium` and
@@ -205,7 +263,8 @@ Rules to avoid this:
 ## How to reproduce on a different PC
 
 Prerequisites: NVIDIA GPU with a recent driver, [uv](https://docs.astral.sh/uv/), and ffmpeg
-(`winget install --id Gyan.FFmpeg`).
+(`winget install --id Gyan.FFmpeg`). For Intel Arc GPUs (no CUDA), use the OpenVINO path
+described in the Arc Pro B70 section instead.
 
 ```bash
 git clone <this repo> && cd ai-av-tools
