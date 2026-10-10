@@ -1,0 +1,1 @@
+uv run main.py "C:\Users\lcabr\OneDrive\Documents\Audacity\AGP_FAQ_2026-09-23.mp3" --provider auto --language es

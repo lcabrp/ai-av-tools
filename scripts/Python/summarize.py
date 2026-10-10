@@ -26,7 +26,7 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent.parent / ".env")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 DEFAULT_PRIMARY_LOCAL = "gemma4:12b"
 DEFAULT_SECONDARY_LOCAL = "gemma4:e4b"
-DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
+DEFAULT_OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-6-luna")
 DEFAULT_ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
@@ -320,7 +320,7 @@ def provider_tag(provider: str, model: str | None = None) -> str:
     Keeps per-provider summaries side-by-side instead of overwriting each other.
     """
     if provider == "openai" and model:
-        # gpt-5.6-luna -> openai_luna (drop the generic gpt-x.y prefix)
+        # gpt-6-luna / gpt-5.6-luna -> openai_luna (drop the generic gpt prefix)
         variant = model.split("-")[-1]
         return f"openai_{variant}"
     return provider
@@ -563,7 +563,7 @@ def main():
     parser.add_argument(
         "--openai-model",
         default=DEFAULT_OPENAI_MODEL,
-        help="OpenAI model to use (default: gpt-5.6-luna, e.g., gpt-5.6-terra, gpt-5.6-sol)",
+        help="OpenAI model to use (default: gpt-6-luna, e.g., gpt-6-sol, gpt-6-astra, gpt-5.6-terra)",
     )
     parser.add_argument(
         "--anthropic-model",

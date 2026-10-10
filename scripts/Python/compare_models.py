@@ -21,7 +21,7 @@ from scripts.Python.summarize import (
 
 MODELS_TO_TEST = [
     {"name": "gemma4_12b", "provider": "ollama", "model": "gemma4:12b"},
-    {"name": "gpt_luna", "provider": "openai", "model": "gpt-5.6-luna"},
+    {"name": "gpt_luna", "provider": "openai", "model": "gpt-6-luna"},
     {"name": "gpt_terra", "provider": "openai", "model": "gpt-5.6-terra"},
     {"name": "gpt_sol", "provider": "openai", "model": "gpt-5.6-sol"},
     {"name": "claude_sonnet", "provider": "anthropic", "model": "claude-sonnet-4-6"},

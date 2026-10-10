@@ -186,7 +186,7 @@ main.py              # Main end-to-end pipeline CLI
 - **Summarization**:
   - **Default**: Google Gemini `gemini-flash-latest` (best detail retention in internal benchmarks; auto-chunks long transcripts)
   - **Local**: Ollama `gemma4:12b`, `gemma4:e4b`
-  - **OpenAI**: `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
+  - **OpenAI**: `gpt-6-luna` (default), `gpt-6-sol`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
   - **Anthropic**: `claude-sonnet-4-6`
   - **Google**: `gemini-flash-latest`
 

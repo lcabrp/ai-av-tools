@@ -22,7 +22,7 @@ def process_pipeline(
     input_path: str,
     whisper_model: str = "medium",
     provider: str = "auto",
-    openai_model: str = "gpt-5.6-luna",
+    openai_model: str = "gpt-6-luna",
     anthropic_model: str = "claude-sonnet-4-6",
     gemini_model: str = "gemini-flash-latest",
     language: str | None = None,
@@ -100,8 +100,8 @@ def main():
     )
     parser.add_argument(
         "--openai-model",
-        default="gpt-5.6-luna",
-        help="OpenAI model to use (default: gpt-5.6-luna, e.g. gpt-5.6-terra, gpt-5.6-sol)",
+        default="gpt-6-luna",
+        help="OpenAI model to use (default: gpt-6-luna, e.g. gpt-6-sol, gpt-6-astra, gpt-5.6-terra)",
     )
     parser.add_argument(
         "--anthropic-model",
