@@ -134,6 +134,20 @@ Gemini (`gemini-flash-latest`) is a **fallback only**, used when Luna is genuine
 say so explicitly in the run report. Other providers are reserved for explicit side-by-side
 comparisons and benchmarks (see `scripts/Python/compare_models.py`). See `AGENTS.md` for the full
 operating rules.
+
+#### Language: summarize in the recording's language, never translate
+
+Recordings are summarized in **Spanish or English**, matching the source — we never translate.
+`summarize.py` picks the language from the `.lang` file written at transcription time (or
+auto-detects it from the transcript when that file is missing), then verifies the generated
+summary with a dependency-free detector:
+
+- If the summary is in the expected language, the run prints `Language check: summary is in spanish.`
+- If it drifts (e.g. a Spanish transcript summarized in Chinese), it prints a warning, **regenerates
+  once** to recover the original language, and re-checks. A persisting mismatch is saved but logged
+  with `status=lang-mismatch` in `Docs/operations-log.csv` so it can be spotted later.
+
+No translation is ever requested, so a Spanish recording always produces a Spanish summary.
 Use `--provider auto` to opt into provider fallback (OpenAI -> Anthropic -> Gemini -> Ollama);
 in auto mode the tag reflects whichever provider actually succeeded. Passing an explicit
 `--output` file path overrides the tag.

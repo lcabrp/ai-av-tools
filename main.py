@@ -116,7 +116,8 @@ def main():
     parser.add_argument(
         "--language",
         default=None,
-        help="Target output language for summary / transcript (default: auto-detect or English)",
+        help="Language for the transcript/summary (default: auto-detect). Summaries stay in the "
+             "recording's language and are never translated.",
     )
     parser.add_argument(
         "--transcripts-dir",

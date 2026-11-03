@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 import textwrap
 import time
@@ -31,6 +32,128 @@ DEFAULT_ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
+# Summaries must stay in the language of the recording: we never translate.
+# Supported/expected languages are Spanish and English, but detection covers a
+# few other scripts so drift (e.g. a Spanish transcript summarized in Chinese)
+# is caught and reported instead of being saved silently.
+LANGUAGE_NAMES = {
+    "es": "spanish",
+    "en": "english",
+    "pt": "portuguese",
+    "fr": "french",
+    "it": "italian",
+    "zh": "chinese",
+    "ja": "japanese",
+    "ko": "korean",
+    "ru": "russian",
+    "ar": "arabic",
+}
+_LANGUAGE_ALIASES = {
+    "es": "es", "spa": "es", "spanish": "es", "espanol": "es", "español": "es",
+    "en": "en", "eng": "en", "english": "en", "ingles": "en", "inglés": "en",
+    "pt": "pt", "portuguese": "pt", "portugues": "pt", "portugués": "pt",
+    "fr": "fr", "french": "fr", "zh": "zh", "chinese": "zh", "ja": "ja",
+    "japanese": "ja", "ko": "ko", "korean": "ko", "ru": "ru", "russian": "ru",
+    "ar": "ar", "arabic": "ar",
+}
+# Function words that separate Spanish from English, plus typographic markers.
+_ES_WORDS = {
+    "que", "de", "la", "el", "los", "las", "para", "con", "por", "una", "un",
+    "es", "en", "del", "se", "su", "sus", "más", "pero", "como", "este", "esta",
+    "hay", "muy", "sin", "sobre", "cuando", "todo", "ya", "también", "nos",
+    "les", "lo", "al", "son", "fue", "tiene", "puede", "hacer", "cómo",
+}
+_EN_WORDS = {
+    "the", "and", "of", "to", "in", "is", "that", "for", "you", "it", "on",
+    "with", "this", "be", "are", "as", "at", "have", "but", "not", "they",
+    "we", "your", "was", "from", "will", "can", "all", "so", "if", "what",
+}
+
+
+def language_code(language: str | None) -> str:
+    """Normalize a language name/code ('es', 'Spanish', 'español') to a short code."""
+    if not language:
+        return ""
+    key = language.strip().lower()
+    return _LANGUAGE_ALIASES.get(key, key)
+
+
+def language_name(language: str | None) -> str:
+    """Full language name for prompts ('es' -> 'spanish'). Unknown names pass through."""
+    code = language_code(language)
+    return LANGUAGE_NAMES.get(code, (language or "english").strip())
+
+
+def _script_counts(text: str) -> dict[str, int]:
+    counts = {"cjk": 0, "kana": 0, "hangul": 0, "cyrillic": 0, "arabic": 0}
+    for ch in text:
+        cp = ord(ch)
+        if 0x3040 <= cp <= 0x30FF:
+            counts["kana"] += 1
+        elif 0xAC00 <= cp <= 0xD7AF:
+            counts["hangul"] += 1
+        elif 0x4E00 <= cp <= 0x9FFF or 0x3400 <= cp <= 0x4DBF:
+            counts["cjk"] += 1
+        elif 0x0400 <= cp <= 0x04FF:
+            counts["cyrillic"] += 1
+        elif 0x0600 <= cp <= 0x06FF:
+            counts["arabic"] += 1
+    return counts
+
+
+def detect_language(text: str) -> tuple[str, float]:
+    """Cheap heuristic language detection: returns (code, confidence 0-1).
+
+    Deliberately dependency-free. Non-Latin scripts are decided by character
+    share (they are unambiguous); Latin text is split with function-word
+    frequency plus Spanish-only diacritics. This is only used to verify that a
+    generated summary is in the recording's language, not for translation.
+    """
+    if not text.strip():
+        return "", 0.0
+
+    counts = _script_counts(text)
+    latin_letters = sum(1 for ch in text if ch.isalpha()) - sum(counts.values())
+    total_letters = max(latin_letters + sum(counts.values()), 1)
+
+    if counts["kana"] / total_letters > 0.02:
+        return "ja", min(1.0, counts["kana"] / total_letters * 5)
+    if counts["hangul"] / total_letters > 0.02:
+        return "ko", min(1.0, counts["hangul"] / total_letters * 5)
+    if counts["cjk"] / total_letters > 0.05:
+        return "zh", min(1.0, counts["cjk"] / total_letters * 5)
+    if counts["cyrillic"] / total_letters > 0.05:
+        return "ru", min(1.0, counts["cyrillic"] / total_letters * 5)
+    if counts["arabic"] / total_letters > 0.05:
+        return "ar", min(1.0, counts["arabic"] / total_letters * 5)
+
+    words = re.findall(r"[a-záéíóúñü]+", text.lower())
+    if not words:
+        return "", 0.0
+    es_score = sum(1 for w in words if w in _ES_WORDS)
+    en_score = sum(1 for w in words if w in _EN_WORDS)
+    # ñ / ¿ / ¡ are essentially Spanish-only in this corpus.
+    spanish_marks = sum(1 for ch in text if ch in "ñ¿¡")
+    es_score += min(spanish_marks, 40)
+
+    top, second = max(es_score, en_score), min(es_score, en_score)
+    if top == 0:
+        return "", 0.0
+    code = "es" if es_score >= en_score else "en"
+    confidence = (top - second) / top
+    return code, confidence
+
+
+def summary_language_ok(summary: str, expected_language: str | None) -> tuple[bool, str, float]:
+    """True when the summary is written in the expected language."""
+    expected = language_code(expected_language)
+    if not expected:
+        return True, "", 0.0
+    detected, confidence = detect_language(summary)
+    if not detected:
+        return True, "", 0.0
+    return detected == expected, detected, confidence
+
 
 def build_system_prompt(language: str) -> str:
     return (
@@ -49,7 +172,8 @@ def build_system_prompt(language: str) -> str:
         f"3. One section per topic, using nested bullet points for sub-details (not just one flat bullet per topic).\n"
         f"4. A final 'Action Items' or 'Next Steps' section if the transcript mentions any.\n\n"
         f"Do not merge distinct details into vague generalizations. If unsure whether something is important, include it. "
-        f"Write the entire summary in {language}."
+        f"Write the entire summary in {language_name(language)}, the language of the transcript. Do not translate it: "
+        f"keep the summary in the original language and keep names, tool names and quoted terms as spoken."
     )
 
 
@@ -369,79 +493,118 @@ def summarize_single_transcript(
         if lang_file.exists():
             language = lang_file.read_text(encoding="utf-8").strip()
         else:
-            language = "english"
+            detected_code, detected_conf = detect_language(transcript)
+            language = LANGUAGE_NAMES.get(detected_code, "english")
+            if detected_code:
+                print(
+                    f"No --language or .lang file; detected '{language}' from the transcript "
+                    f"(confidence {detected_conf:.2f})."
+                )
 
-    summary = None
-    used_config = ""
     t_start = time.perf_counter()
 
-    # Auto mode tries OpenAI (Luna, single request) first, then Anthropic, Gemini and
-    # Ollama. Gemini requests are automatically chunked above the configured threshold.
-    if provider in ("auto", "openai"):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            print("OpenAI API key not found in environment or .env file.")
-        else:
-            try:
-                print(f"Generating summary with OpenAI ({openai_model})...")
-                openai_client = OpenAI(api_key=api_key)
-                summary = generate_with_openai_compatible(openai_client, openai_model, transcript, language)
-                used_config = f"openai/{openai_model}"
-                _tag_output("openai", openai_model)
-            except Exception as e:
-                print(f"OpenAI API failed: {e}")
+    def _dispatch() -> tuple[str | None, str]:
+        """Run the configured provider chain once; return (summary, config label).
 
-    if summary is None and provider in ("auto", "anthropic"):
-        try:
-            print(f"Generating summary with Anthropic ({anthropic_model})...")
-            summary = generate_with_anthropic(anthropic_model, transcript, language)
-            used_config = f"anthropic/{anthropic_model}"
-            _tag_output("anthropic", anthropic_model)
-        except Exception as e:
-            print(f"Anthropic API failed: {e}")
+        Called a second time when the first summary drifts into another language
+        (checked below). That costs one extra request but keeps a translated
+        summary from being saved silently.
+        """
+        result = None
+        config = ""
 
-    if summary is None and provider in ("auto", "gemini"):
-        try:
-            if len(transcript) > gemini_chunk_chars:
-                print(f"Generating summary with Gemini ({gemini_model}), chunked (long transcript)...")
-                summary = generate_with_gemini_chunked(gemini_model, transcript, language, gemini_chunk_chars)
-                used_config = f"gemini/{gemini_model} chunked({gemini_chunk_chars})"
+        # Auto mode tries OpenAI (Luna, single request) first, then Anthropic, Gemini and
+        # Ollama. Gemini requests are automatically chunked above the configured threshold.
+        if provider in ("auto", "openai"):
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                print("OpenAI API key not found in environment or .env file.")
             else:
-                print(f"Generating summary with Gemini ({gemini_model})...")
-                summary = generate_with_gemini(gemini_model, transcript, language)
-                used_config = f"gemini/{gemini_model} single-shot"
-            _tag_output("gemini", gemini_model)
-        except Exception as e:
-            print(f"Gemini API failed: {e}")
-
-    if summary is None and provider in ("auto", "ollama"):
-        generate_local = (
-            (lambda m: generate_with_ollama_chunked(
-                m, transcript, language, chunk_chars,
-                local_reduce_chars, local_context, local_temperature,
-            ))
-            if use_chunking
-            else (lambda m: generate_with_ollama(
-                m, build_system_prompt(language), build_user_prompt(transcript),
-                local_context, local_temperature,
-            ))
-        )
-        mode = f"chunked({chunk_chars})" if use_chunking else "single-shot"
-        try:
-            print(f"Generating summary with local Ollama ({local_model}) for {transcript_path.name}...")
-            summary = generate_local(local_model)
-            used_config = f"ollama/{local_model} {mode}"
-            _tag_output("ollama", local_model)
-        except Exception as e:
-            print(f"Ollama primary model ({local_model}) failed: {e}")
-            if provider == "auto":
                 try:
-                    print(f"Falling back to secondary local Ollama model ({local_fallback_model})...")
-                    summary = generate_local(local_fallback_model)
-                    used_config = f"ollama/{local_fallback_model} {mode} (fallback)"
-                    _tag_output("ollama", local_fallback_model)
-                except Exception as e2:
-                    print(f"Ollama secondary model ({local_fallback_model}) failed: {e2}")
+                    print(f"Generating summary with OpenAI ({openai_model})...")
+                    openai_client = OpenAI(api_key=api_key)
+                    result = generate_with_openai_compatible(openai_client, openai_model, transcript, language)
+                    config = f"openai/{openai_model}"
+                    _tag_output("openai", openai_model)
+                except Exception as e:
+                    print(f"OpenAI API failed: {e}")
+
+        if result is None and provider in ("auto", "anthropic"):
+            try:
+                print(f"Generating summary with Anthropic ({anthropic_model})...")
+                result = generate_with_anthropic(anthropic_model, transcript, language)
+                config = f"anthropic/{anthropic_model}"
+                _tag_output("anthropic", anthropic_model)
+            except Exception as e:
+                print(f"Anthropic API failed: {e}")
+
+        if result is None and provider in ("auto", "gemini"):
+            try:
+                if len(transcript) > gemini_chunk_chars:
+                    print(f"Generating summary with Gemini ({gemini_model}), chunked (long transcript)...")
+                    result = generate_with_gemini_chunked(gemini_model, transcript, language, gemini_chunk_chars)
+                    config = f"gemini/{gemini_model} chunked({gemini_chunk_chars})"
+                else:
+                    print(f"Generating summary with Gemini ({gemini_model})...")
+                    result = generate_with_gemini(gemini_model, transcript, language)
+                    config = f"gemini/{gemini_model} single-shot"
+                _tag_output("gemini", gemini_model)
+            except Exception as e:
+                print(f"Gemini API failed: {e}")
+
+        if result is None and provider in ("auto", "ollama"):
+            generate_local = (
+                (lambda m: generate_with_ollama_chunked(
+                    m, transcript, language, chunk_chars,
+                    local_reduce_chars, local_context, local_temperature,
+                ))
+                if use_chunking
+                else (lambda m: generate_with_ollama(
+                    m, build_system_prompt(language), build_user_prompt(transcript),
+                    local_context, local_temperature,
+                ))
+            )
+            mode = f"chunked({chunk_chars})" if use_chunking else "single-shot"
+            try:
+                print(f"Generating summary with local Ollama ({local_model}) for {transcript_path.name}...")
+                result = generate_local(local_model)
+                config = f"ollama/{local_model} {mode}"
+                _tag_output("ollama", local_model)
+            except Exception as e:
+                print(f"Ollama primary model ({local_model}) failed: {e}")
+                if provider == "auto":
+                    try:
+                        print(f"Falling back to secondary local Ollama model ({local_fallback_model})...")
+                        result = generate_local(local_fallback_model)
+                        config = f"ollama/{local_fallback_model} {mode} (fallback)"
+                        _tag_output("ollama", local_fallback_model)
+                    except Exception as e2:
+                        print(f"Ollama secondary model ({local_fallback_model}) failed: {e2}")
+
+        return result, config
+
+    summary, used_config = _dispatch()
+
+    # Never translate: the summary must stay in the recording's language.
+    lang_ok, detected_lang, _ = summary_language_ok(summary or "", language)
+    if summary is not None and not lang_ok:
+        detected_label = LANGUAGE_NAMES.get(detected_lang, detected_lang)
+        print(
+            f"Warning: summary came back in '{detected_label}' but the transcript is "
+            f"'{language_name(language)}'. Retrying once to keep the original language..."
+        )
+        retry_summary, retry_config = _dispatch()
+        if retry_summary is not None:
+            summary, used_config = retry_summary, f"{retry_config} (language retry)"
+            lang_ok, detected_lang, _ = summary_language_ok(summary, language)
+            if not lang_ok:
+                detected_label = LANGUAGE_NAMES.get(detected_lang, detected_lang)
+                print(
+                    f"Warning: retry still came back in '{detected_label}'. Saving it but flagging "
+                    f"this run as lang-mismatch."
+                )
+    if summary is not None and lang_ok:
+        print(f"Language check: summary is in {language_name(language)}.")
 
     elapsed = time.perf_counter() - t_start
 
@@ -470,7 +633,7 @@ def summarize_single_transcript(
         output_file=output_path.name,
         input_chars=len(transcript),
         output_chars=len(summary),
-        status="ok",
+        status="ok" if lang_ok else "lang-mismatch",
     )
     return True
 
@@ -551,7 +714,8 @@ def main():
     parser.add_argument(
         "--language",
         default=None,
-        help="Output language (default: auto-detect from .lang file or english)",
+        help="Summary language (default: the transcript's .lang file, else auto-detected from the "
+             "transcript). Summaries are never translated: they stay in the recording's language.",
     )
     parser.add_argument(
         "--provider",

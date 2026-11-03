@@ -24,6 +24,20 @@ Operational rules for agents working in this repo. Keep changes consistent with 
   (e.g. `scripts/Python/compare_models.py`, `Docs/local-summary-benchmark-results.csv`).
 - Both CLIs already default to `gpt-6-luna`; pass `--openai-model` only to override deliberately.
 
+## Language policy: summarize in the source language
+
+Recordings are Spanish or English. **Summaries are never translated** — a Spanish recording gets a
+Spanish summary, an English one gets English.
+
+- Language comes from `Output/transcripts/<name>.lang` (written by `transcribe.py` /
+  `youtube_transcript.py`), or is auto-detected from the transcript when that file is missing.
+  Do not force `--language english` on a Spanish recording.
+- `summarize.py` verifies every summary with a dependency-free detector
+  (`detect_language`, `summary_language_ok`). On mismatch it regenerates once; if it still drifts it
+  saves the result but logs `status=lang-mismatch` in `Docs/operations-log.csv`.
+- Report the language check result alongside the summary stats. If a mismatch survives the retry,
+  say it plainly instead of shipping the file as fine.
+
 ## Standard workflow for a local audio/video file
 
 1. Verify the file exists and get its duration with `ffprobe`.
