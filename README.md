@@ -122,6 +122,18 @@ uv run scripts/Python/summarize.py Output/transcripts/sample.txt --language engl
 Summaries are saved as `Output/<name>_summary_<provider>.md` (e.g. `_summary_gemini.md`,
 `_summary_openai_luna.md`) so results from different providers stay side-by-side instead of
 overwriting each other. The default provider is OpenAI Luna, which summarizes in one request.
+
+#### Provider policy: Luna first, one summary per recording
+
+**Luna (`gpt-6-luna`) is the default and normally the only provider we run.** One summary per
+recording — do not also generate a Gemini/Anthropic/Ollama summary "just in case", since that
+doubles cost and leaves two competing documents downstream.
+
+Gemini (`gemini-flash-latest`) is a **fallback only**, used when Luna is genuinely unavailable
+(missing/invalid `OPENAI_API_KEY`, or the OpenAI request fails after retrying). When that happens,
+say so explicitly in the run report. Other providers are reserved for explicit side-by-side
+comparisons and benchmarks (see `scripts/Python/compare_models.py`). See `AGENTS.md` for the full
+operating rules.
 Use `--provider auto` to opt into provider fallback (OpenAI -> Anthropic -> Gemini -> Ollama);
 in auto mode the tag reflects whichever provider actually succeeded. Passing an explicit
 `--output` file path overrides the tag.
