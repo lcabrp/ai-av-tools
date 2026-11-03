@@ -21,7 +21,7 @@ from scripts.Python.youtube_transcript import (
 def process_pipeline(
     input_path: str,
     whisper_model: str = "medium",
-    provider: str = "auto",
+    provider: str = "openai",
     openai_model: str = "gpt-6-luna",
     anthropic_model: str = "claude-sonnet-4-6",
     gemini_model: str = "gemini-flash-latest",
@@ -94,9 +94,9 @@ def main():
     )
     parser.add_argument(
         "--provider",
-        default="auto",
+        default="openai",
         choices=["auto", "ollama", "openai", "anthropic", "gemini"],
-        help="LLM provider for summary: auto (gemini -> anthropic -> openai -> ollama), ollama, openai, anthropic, or gemini (default: auto)",
+        help="LLM provider for summary (default: openai/Luna; auto fallback order: openai -> anthropic -> gemini -> ollama)",
     )
     parser.add_argument(
         "--openai-model",

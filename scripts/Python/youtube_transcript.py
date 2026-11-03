@@ -64,6 +64,34 @@ def fetch_video_title(video_id: str) -> str | None:
         return None
 
 
+def pick_caption_language(ytt: YouTubeTranscriptApi, video_id: str) -> str | None:
+    """Choose the best available caption track before fetching.
+
+    Without this, `ytt.fetch(video_id)` only asks for English and raises when the
+    video has captions in another language, which used to push the whole pipeline
+    into the much slower audio-download + faster-whisper fallback even though
+    usable captions existed.
+
+    Preference order: manual English, generated English, any manual track,
+    any generated track (usually the original-language ASR).
+    """
+    try:
+        lister = ytt.list if hasattr(ytt, "list") else ytt.list_transcripts
+        available = list(lister(video_id))
+    except Exception:
+        return None
+
+    if not available:
+        return None
+
+    def rank(transcript) -> tuple[int, int]:
+        is_en = getattr(transcript, "language_code", "") == "en"
+        is_generated = bool(getattr(transcript, "is_generated", False))
+        return (0 if is_en else 1, 0 if not is_generated else 1)
+
+    return getattr(min(available, key=rank), "language_code", None)
+
+
 def fetch_youtube_transcript(
     url_or_id: str,
     output_dir: Path | str = "Output/transcripts",
@@ -97,11 +125,12 @@ def fetch_youtube_transcript(
     # Initialize transcript API
     ytt = YouTubeTranscriptApi()
     transcript_snippets = None
-    detected_lang = language or "en"
+    caption_language = language or pick_caption_language(ytt, video_id)
+    detected_lang = caption_language or "en"
 
     try:
-        if language:
-            transcript_snippets = ytt.fetch(video_id, languages=[language, "en"])
+        if caption_language:
+            transcript_snippets = ytt.fetch(video_id, languages=[caption_language, "en"])
         else:
             transcript_snippets = ytt.fetch(video_id)
     except Exception as e:
@@ -109,7 +138,7 @@ def fetch_youtube_transcript(
         if hasattr(YouTubeTranscriptApi, "get_transcript"):
             try:
                 transcript_snippets = YouTubeTranscriptApi.get_transcript(
-                    video_id, languages=[language] if language else ["en"]
+                    video_id, languages=[caption_language] if caption_language else ["en"]
                 )
             except Exception as inner_e:
                 print(f"Error retrieving transcript: {inner_e}")
@@ -121,6 +150,11 @@ def fetch_youtube_transcript(
     if not transcript_snippets:
         print(f"No transcript found for video: {video_id}")
         return []
+
+    # Record the language the captions were actually delivered in (the .lang file
+    # drives the default summary language downstream).
+    detected_lang = getattr(transcript_snippets, "language_code", None) or detected_lang
+    print(f"Using captions in '{detected_lang}'")
 
     # Extract text and timestamps
     plain_segments = []

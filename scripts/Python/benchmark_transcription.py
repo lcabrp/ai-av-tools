@@ -1,6 +1,9 @@
-"""Benchmark transcription backends (openai-whisper vs faster-whisper) on this machine.
+"""Benchmark faster-whisper compute types on this machine.
 
-Prints a system-info header plus load/transcribe timings for each backend config and
+(openai-whisper was benchmarked earlier, was slower on every GPU tested, and was removed;
+see Docs/whisper-benchmark.md.)
+
+Prints a system-info header plus load/transcribe timings for each compute type and
 saves every transcript (plus a report file) so outputs can be compared for quality.
 See Docs/whisper-benchmark.md for recorded results and how to reproduce on another PC.
 """
@@ -62,7 +65,6 @@ def system_info(machine_name: str | None = None) -> dict:
         "torch": str(torch.__version__),
         "cuda_available": torch.cuda.is_available(),
         "cuda_runtime": torch.version.cuda or "",
-        "openai_whisper": pkg_version("openai-whisper"),
         "faster_whisper": pkg_version("faster-whisper"),
         "gpu": "none",
         "compute_capability": "",
@@ -95,7 +97,6 @@ def system_header(info: dict) -> list[str]:
         f"hostname: {info['machine']}",
         f"python: {info['python']}",
         f"torch: {info['torch']} (cuda_available={info['cuda_available']}, cuda_runtime={info['cuda_runtime']})",
-        f"openai-whisper: {info['openai_whisper']}",
         f"faster-whisper: {info['faster_whisper']}",
     ]
     if info["cuda_available"]:
@@ -122,10 +123,7 @@ def save_comparison_csv(path: Path, rows: list[dict], info: dict,
 
     new_records = []
     for row in rows:
-        backend_version = (
-            info["openai_whisper"] if row["backend"] == "openai-whisper"
-            else info["faster_whisper"]
-        )
+        backend_version = info["faster_whisper"]
         new_records.append({
             "recorded_at": info["recorded_at"],
             "machine": info["machine"],
@@ -175,34 +173,6 @@ def make_slice(audio: Path, seconds: int, outdir: Path) -> Path:
     return sliced
 
 
-def run_openai_whisper(audio: Path, model_size: str, language: str | None, outdir: Path) -> dict:
-    row = {"backend": "openai-whisper", "config": model_size, "device": "",
-           "load_s": None, "run_s": None, "total_s": None, "chars": None,
-           "output": "", "error": None}
-    try:
-        import whisper
-        fp16 = torch.cuda.is_available()
-        compute = "fp16" if fp16 else "fp32"
-        t0 = time.perf_counter()
-        model = whisper.load_model(model_size)
-        t1 = time.perf_counter()
-        result = model.transcribe(str(audio), language=language, fp16=fp16)
-        t2 = time.perf_counter()
-        text = result["text"].strip()
-        row["device"] = str(next(model.parameters()).device)
-        row["config"] = f"{model_size} {compute}"
-        del model
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        out_file = outdir / f"openai-whisper-{model_size}-{compute}.txt"
-        out_file.write_text(text, encoding="utf-8")
-        row.update(load_s=t1 - t0, run_s=t2 - t1, total_s=t2 - t0,
-                   chars=len(text), output=str(out_file))
-    except Exception as e:
-        row["error"] = f"{type(e).__name__}: {e}"
-    return row
-
-
 def run_faster_whisper(audio: Path, model_size: str, compute_type: str,
                        language: str | None, outdir: Path) -> dict:
     row = {"backend": "faster-whisper", "config": f"{model_size} {compute_type}",
@@ -248,7 +218,7 @@ def print_table(rows: list[dict]):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Benchmark openai-whisper vs faster-whisper on this machine.")
+        description="Benchmark faster-whisper compute types on this machine.")
     parser.add_argument("audio", help="Audio/video file to benchmark")
     parser.add_argument("--slice", type=int, default=300, metavar="SECONDS",
                         help="Only benchmark the first N seconds (0 = whole file, default 300)")
@@ -257,10 +227,6 @@ def main():
     parser.add_argument("--model", default="medium",
                         choices=["tiny", "base", "small", "medium", "large"],
                         help="Whisper model size (default: medium)")
-    parser.add_argument("--all-models", action="store_true",
-                        help="Also benchmark tiny/base/small/medium with openai-whisper")
-    parser.add_argument("--skip-openai", action="store_true")
-    parser.add_argument("--skip-faster", action="store_true")
     parser.add_argument("--output-dir", default="bench_output",
                         help="Where to save transcripts and the report (default: bench_output)")
     parser.add_argument("--comparison-csv", default="Docs/transcription-benchmark-results.csv",
@@ -296,25 +262,14 @@ def main():
     print(f"\n=== Benchmarking: {audio.name} ===")
     rows: list[dict] = []
 
-    if not args.skip_openai:
-        sizes = ["tiny", "base", "small", "medium"] if args.all_models else [args.model]
-        for size in sizes:
-            print(f"[openai-whisper {size}] running ...", flush=True)
-            row = run_openai_whisper(audio, size, args.language, outdir)
-            rows.append(row)
-            print(f"[openai-whisper {row['config']}] transcribe={fmt(row['run_s'], 's')} "
-                  f"chars={row['chars']} device={row['device']}" if not row["error"]
-                  else f"[openai-whisper {size}] FAILED: {row['error']}", flush=True)
-
-    if not args.skip_faster:
-        compute_types = ["float16", "int8_float16", "float32"] if torch.cuda.is_available() else ["int8"]
-        for compute in compute_types:
-            print(f"[faster-whisper {args.model} {compute}] running ...", flush=True)
-            row = run_faster_whisper(audio, args.model, compute, args.language, outdir)
-            rows.append(row)
-            print(f"[faster-whisper {row['config']}] transcribe={fmt(row['run_s'], 's')} "
-                  f"chars={row['chars']}" if not row["error"]
-                  else f"[faster-whisper {compute}] FAILED: {row['error']}", flush=True)
+    compute_types = ["float16", "int8_float16", "float32"] if torch.cuda.is_available() else ["int8"]
+    for compute in compute_types:
+        print(f"[faster-whisper {args.model} {compute}] running ...", flush=True)
+        row = run_faster_whisper(audio, args.model, compute, args.language, outdir)
+        rows.append(row)
+        print(f"[faster-whisper {row['config']}] transcribe={fmt(row['run_s'], 's')} "
+              f"chars={row['chars']}" if not row["error"]
+              else f"[faster-whisper {compute}] FAILED: {row['error']}", flush=True)
 
     print_table(rows)
 

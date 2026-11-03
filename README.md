@@ -42,14 +42,14 @@ GEMINI_API_KEY=your_gemini_api_key_here
 Process a YouTube video, a single video/audio file, or an entire directory of media files:
 
 ```bash
-# Process a YouTube video directly (extracts subtitles in seconds without GPU compute, then summarizes)
-uv run main.py "https://youtu.be/HzGOWq5UyjY" --provider auto
+# Process a YouTube video directly (uses captions when available, then summarizes with OpenAI Luna)
+uv run main.py "https://youtu.be/HzGOWq5UyjY"
 
-# Process a local video or audio file (or folder) with smart automatic model fallback
+# Process a local video or audio file (or folder); Luna is the default summary model
 uv run main.py Docs/Video/JaimeHiguera
 
-# Specify whisper model and summary provider explicitly (medium is the default; more accurate than base)
-uv run main.py Docs/Video/JaimeHiguera --whisper-model medium --provider auto
+# Opt into provider fallback (OpenAI -> Anthropic -> Gemini -> Ollama)
+uv run main.py Docs/Video/JaimeHiguera --provider auto
 ```
 
 ### YouTube Video Transcripts
@@ -69,6 +69,13 @@ This generates:
 - `<Title> [<ID>]_timestamps.txt`: Human-readable transcript with `[MM:SS]` timestamps.
 - `<Title> [<ID>].lang`: Detected language metadata.
 
+Caption language is auto-selected: English tracks are preferred, then any other available
+track (e.g. the original-language auto-generated captions). This matters because
+`YouTubeTranscriptApi.fetch()` only requests `en` by default, so a Spanish-only video used to
+look "subtitle-less" and silently drop into the slow Whisper path. The detected language is
+written to the `.lang` file, which makes the summary come out in the video's own language by
+default — pass `--language english` when you'd rather have it in English.
+
 If a video has subtitles disabled, `main.py` automatically falls back to downloading the
 audio with `yt-dlp` (saved under `Docs/Audio/youtube/`, skipped if already downloaded) and
 transcribing it locally with faster-whisper before summarizing — so the end-to-end pipeline
@@ -87,7 +94,7 @@ Detects language automatically and saves transcripts to `Output/transcripts/`. D
 crosstalk), which matters because a garbled transcript can't be recovered by even the best
 summarization model. Use `--model large` for maximum accuracy if you can tolerate the extra runtime.
 
-To benchmark transcription speed/quality of openai-whisper vs faster-whisper on a given GPU, see
+To benchmark faster-whisper compute types (FP16, INT8/FP16, FP32) on a given GPU, see
 [`Docs/whisper-benchmark.md`](Docs/whisper-benchmark.md) and `scripts/Python/benchmark_transcription.py`.
 Current benchmark results recommend faster-whisper `medium`: FP16 on modern RTX GPUs, or
 INT8/FP16 on the NVIDIA T1000. Cross-machine results are tracked in
@@ -98,14 +105,15 @@ INT8/FP16 on the NVIDIA T1000. Cross-machine results are tracked in
 Summarize single transcript files or all transcripts in a directory using your choice of LLM provider:
 
 ```bash
-# Auto mode: Gemini -> Anthropic -> OpenAI -> Ollama (12b -> e4b)
-uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider auto
+# Default: OpenAI Luna, single-shot
+uv run scripts/Python/summarize.py Output/transcripts/sample.txt
 
 # Specific providers
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider ollama
-uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider openai --openai-model gpt-5.6-terra
+uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider openai --openai-model gpt-6-luna
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider anthropic --anthropic-model claude-sonnet-4-6
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider gemini --gemini-model gemini-flash-latest
+uv run scripts/Python/summarize.py Output/transcripts/sample.txt --provider auto
 
 # Override summary language
 uv run scripts/Python/summarize.py Output/transcripts/sample.txt --language english
@@ -113,12 +121,14 @@ uv run scripts/Python/summarize.py Output/transcripts/sample.txt --language engl
 
 Summaries are saved as `Output/<name>_summary_<provider>.md` (e.g. `_summary_gemini.md`,
 `_summary_openai_luna.md`) so results from different providers stay side-by-side instead of
-overwriting each other. In `--provider auto` mode the tag reflects whichever provider actually
-succeeded. Passing an explicit `--output` file path overrides the tag.
+overwriting each other. The default provider is OpenAI Luna, which summarizes in one request.
+Use `--provider auto` to opt into provider fallback (OpenAI -> Anthropic -> Gemini -> Ollama);
+in auto mode the tag reflects whichever provider actually succeeded. Passing an explicit
+`--output` file path overrides the tag.
 
-#### Default provider: Gemini, with automatic chunking
+#### Gemini summaries and automatic chunking
 
-`gemini-flash-latest` is the default/preferred provider — in side-by-side comparisons against
+Gemini is available as an explicit provider or through `--provider auto`. In side-by-side comparisons against
 Ollama (`gemma4:12b`/`e4b`), OpenAI (`gpt-5.6-sol/terra/luna`), and Anthropic (`claude-sonnet-4-6`),
 it consistently retained the most concrete detail (prices, names, step-by-step instructions).
 
@@ -184,9 +194,9 @@ main.py              # Main end-to-end pipeline CLI
   - **YouTube**: `youtube-transcript-api` (instant subtitle extraction, zero-GPU overhead)
   - **Local Media**: faster-whisper (local CUDA-accelerated, supports all audio and video formats; default model `medium`, auto FP16 on modern RTX / INT8-FP16 on older GPUs)
 - **Summarization**:
-  - **Default**: Google Gemini `gemini-flash-latest` (best detail retention in internal benchmarks; auto-chunks long transcripts)
+  - **Default**: OpenAI `gpt-6-luna` (single-shot)
   - **Local**: Ollama `gemma4:12b`, `gemma4:e4b`
-  - **OpenAI**: `gpt-6-luna` (default), `gpt-6-sol`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
+  - **OpenAI**: `gpt-6-luna`, `gpt-6-sol`, `gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`
   - **Anthropic**: `claude-sonnet-4-6`
   - **Google**: `gemini-flash-latest`
 

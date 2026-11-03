@@ -135,6 +135,30 @@ conservative default for compute capability >= 8.0 since the gap is within run-t
 avoids quantization.
 Results are in `Docs/transcription-benchmark-results.csv` (machine `ZBookPowerG9-03`).
 
+## RTX 4060 Laptop comparison
+
+System: Legion7-16IRX9, NVIDIA GeForce RTX 4060 Laptop GPU 8GB (Ada, compute capability 8.9,
+24 SMs), driver 616.56, torch 2.6.0+cu124, Python 3.13.7, openai-whisper 20250625,
+faster-whisper 1.2.1. Same first 300 seconds of the same Spanish KTA Institute recording.
+
+| Backend | Config | RTX 4070 | RTX 4060 | RTX A4000 | RTX A2000 |
+|---|---|---:|---:|---:|---:|
+| openai-whisper medium | fp16 | 20.9s | 21.9s | 33.2s | 26.9s |
+| faster-whisper medium | float16 | **10.9s** | 14.2s | 15.6s | 20.1s |
+| faster-whisper medium | int8_float16 | **10.6s** | 14.4s | 18.2s | 19.7s |
+| faster-whisper medium | float32 | 13.7s | 23.2s | 22.5s | 35.8s |
+
+The RTX 4060 processed the 300-second sample at about **21.1x real-time** with faster-whisper
+FP16. It was about **1.10x faster than the A4000** and **1.42x faster than the A2000** in this
+test, while the RTX 4070 remained faster. FP16 and INT8/FP16 were effectively tied on the 4060
+(14.2s vs. 14.4s); FP16 remains the conservative default. The FP16 transcript had 3,794
+characters, matching the RTX 4070 result and closely matching the A2000/A4000 runs. Character
+counts are only a rough output comparison, not an accuracy score.
+
+Results are in `Docs/transcription-benchmark-results.csv` (machine `Legion7-16IRX9`); the
+benchmark report and per-configuration transcripts are saved under
+`bench_output/RTX4060-KTA-2026-10-25/` (git-ignored).
+
 ## Intel Arc Pro B70 via OpenVINO — 2026-09-20
 
 System: HP-Z2-G9, Intel Arc Pro B70 dGPU (driver 32.0.101.8805) + i9-12900, **no NVIDIA

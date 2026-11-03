@@ -330,7 +330,7 @@ def summarize_single_transcript(
     transcript_path: Path,
     output_path: Path,
     language: str | None = None,
-    provider: str = "auto",
+    provider: str = "openai",
     openai_model: str = DEFAULT_OPENAI_MODEL,
     anthropic_model: str = DEFAULT_ANTHROPIC_MODEL,
     gemini_model: str = DEFAULT_GEMINI_MODEL,
@@ -375,33 +375,9 @@ def summarize_single_transcript(
     used_config = ""
     t_start = time.perf_counter()
 
-    # gemini-flash-latest is the default: best detail retention in benchmarks. Long
-    # transcripts are automatically chunked (map-reduce) since that measurably improved
-    # detail retention (e.g. captured individually named cases a single-shot call missed).
-    if provider in ("auto", "gemini"):
-        try:
-            if len(transcript) > gemini_chunk_chars:
-                print(f"Generating summary with Gemini ({gemini_model}), chunked (long transcript)...")
-                summary = generate_with_gemini_chunked(gemini_model, transcript, language, gemini_chunk_chars)
-                used_config = f"gemini/{gemini_model} chunked({gemini_chunk_chars})"
-            else:
-                print(f"Generating summary with Gemini ({gemini_model})...")
-                summary = generate_with_gemini(gemini_model, transcript, language)
-                used_config = f"gemini/{gemini_model} single-shot"
-            _tag_output("gemini", gemini_model)
-        except Exception as e:
-            print(f"Gemini API failed: {e}")
-
-    if summary is None and provider in ("auto", "anthropic"):
-        try:
-            print(f"Generating summary with Anthropic ({anthropic_model})...")
-            summary = generate_with_anthropic(anthropic_model, transcript, language)
-            used_config = f"anthropic/{anthropic_model}"
-            _tag_output("anthropic", anthropic_model)
-        except Exception as e:
-            print(f"Anthropic API failed: {e}")
-
-    if summary is None and provider in ("auto", "openai"):
+    # Auto mode tries OpenAI (Luna, single request) first, then Anthropic, Gemini and
+    # Ollama. Gemini requests are automatically chunked above the configured threshold.
+    if provider in ("auto", "openai"):
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             print("OpenAI API key not found in environment or .env file.")
@@ -414,6 +390,29 @@ def summarize_single_transcript(
                 _tag_output("openai", openai_model)
             except Exception as e:
                 print(f"OpenAI API failed: {e}")
+
+    if summary is None and provider in ("auto", "anthropic"):
+        try:
+            print(f"Generating summary with Anthropic ({anthropic_model})...")
+            summary = generate_with_anthropic(anthropic_model, transcript, language)
+            used_config = f"anthropic/{anthropic_model}"
+            _tag_output("anthropic", anthropic_model)
+        except Exception as e:
+            print(f"Anthropic API failed: {e}")
+
+    if summary is None and provider in ("auto", "gemini"):
+        try:
+            if len(transcript) > gemini_chunk_chars:
+                print(f"Generating summary with Gemini ({gemini_model}), chunked (long transcript)...")
+                summary = generate_with_gemini_chunked(gemini_model, transcript, language, gemini_chunk_chars)
+                used_config = f"gemini/{gemini_model} chunked({gemini_chunk_chars})"
+            else:
+                print(f"Generating summary with Gemini ({gemini_model})...")
+                summary = generate_with_gemini(gemini_model, transcript, language)
+                used_config = f"gemini/{gemini_model} single-shot"
+            _tag_output("gemini", gemini_model)
+        except Exception as e:
+            print(f"Gemini API failed: {e}")
 
     if summary is None and provider in ("auto", "ollama"):
         generate_local = (
@@ -480,7 +479,7 @@ def summarize_transcripts(
     input_path: str,
     output: str | None = None,
     language: str | None = None,
-    provider: str = "auto",
+    provider: str = "openai",
     openai_model: str = DEFAULT_OPENAI_MODEL,
     anthropic_model: str = DEFAULT_ANTHROPIC_MODEL,
     gemini_model: str = DEFAULT_GEMINI_MODEL,
@@ -556,9 +555,9 @@ def main():
     )
     parser.add_argument(
         "--provider",
-        default="auto",
+        default="openai",
         choices=["auto", "ollama", "openai", "anthropic", "gemini"],
-        help="LLM provider: auto (gemini -> anthropic -> openai -> ollama), ollama, openai, anthropic, or gemini",
+        help="LLM provider (default: openai/Luna; auto fallback order: openai -> anthropic -> gemini -> ollama)",
     )
     parser.add_argument(
         "--openai-model",
@@ -646,6 +645,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
 
