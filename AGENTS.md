@@ -38,6 +38,44 @@ Spanish summary, an English one gets English.
 - Report the language check result alongside the summary stats. If a mismatch survives the retry,
   say it plainly instead of shipping the file as fine.
 
+## Where outputs go
+
+`Output/` is a **staging area, not the destination.** Every run's artifacts belong in the
+downstream knowledge repo, filed by topic:
+
+```
+exploring-pathways/Pathways/<Topic>/<Brand or Person>/<ClaseN | YYYYMMDD>/
+    <stem>.txt
+    <stem>.lang
+    <stem>_timestamps.txt
+    <stem>_summary_luna.md
+```
+
+After a run, move the artifacts there (transcript, `.lang`, timestamps and the summary), and
+leave `Output/` empty apart from `.gitkeep`:
+
+```bash
+uv run scripts/Python/file_outputs.py "<stem>" --dest "C:\\...\\exploring-pathways\\Pathways\\<Topic>\\<Brand>\\<Clase|Date>"
+```
+
+The helper moves by default (use `--keep-source` to copy, `--dry-run` to preview) and reports
+missing artifacts instead of failing. Topic folders in use:
+
+| Recording type | Folder |
+|---|---|
+| Tax preparer courses | `TaxPreparer\<Brand>\<ClaseN>` (e.g. `TaxMaster\Clase2`, `HugoTaxPro\Preparatorio`, `ClasesDeTaxes[\Software]`, `EdukInstitute\Clase3`, `KTA_Institute\Classes`, `ProFinanceAcademy\Classes`) |
+| Credit repair / funding | `CreditRepair\<Brand>[\<Person>][\<YYYYMMDD>]` (e.g. `UnionSolutions\20261020`, `CashFlowVIP\20261003`, `CapitalFunding\JoseKalil`) |
+| Cybersecurity | `Cyber\<Vendor>\<Person>` or `CyberSec\<Program>` |
+| Insurance sales | `Insurance\<Person>` (e.g. `Insurance\GustavoAbreu`) |
+| TikTok Shop | `TikTok\TikTokWiz\<YYYYMMDD>` |
+| Machine learning | `ML\<Person>\<YYYYMMDD>` |
+| Digital marketing | `DigitalMarketing\<Person>\<YYYYMMDD>` |
+| Amazon / e-commerce | `Amazon\<Brand>\<YYYYMMDD>` |
+
+When a topic is new, follow the existing pattern (topic → brand/person → class or date) instead of
+creating a flat folder. Those artifacts are the user's working documents, so don't delete or
+reorganize archived files without being asked.
+
 ## Standard workflow for a local audio/video file
 
 1. Verify the file exists and get its duration with `ffprobe`.
@@ -49,8 +87,11 @@ Spanish summary, an English one gets English.
    → `Output/<name>_summary_luna.md` (or `_summary_openai_luna.md` if `--output` is omitted).
 4. Validate: check the file exists and is non-trivial (chars/words/lines), then read the first
    ~20 lines to confirm the content matches the recording.
-5. Report: source, duration, detected language, transcript size, summary path + size, and a
-   short topic summary. Mention any anomaly (mis-detected language, truncated audio, retries).
+5. File the artifacts into the topic folder in `exploring-pathways` with
+   `scripts/Python/file_outputs.py` (see *Where outputs go* above).
+6. Report: source, duration, detected language, transcript size, summary path + size, the
+   language-check result, and a short topic summary. Mention any anomaly (mis-detected language,
+   truncated audio, retries).
 
 ## YouTube URLs
 

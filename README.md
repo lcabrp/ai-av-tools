@@ -208,11 +208,15 @@ uv run scripts/Python/compare_models.py Output/transcripts/sample.txt
 Docs/Audio/          # Audio files (not tracked)
 Docs/Video/          # Video files (not tracked)
 Output/
-  transcripts/       # Generated transcripts
-  *_summary_*.md     # Markdown summaries, tagged per provider
-scripts/Python/      # Transcribe, youtube_transcript, summarize, and compare_models scripts
+  transcripts/       # Generated transcripts (staging: move them to exploring-pathways)
+  *_summary_*.md     # Markdown summaries, tagged per provider (staging)
+scripts/Python/      # Transcribe, youtube_transcript, summarize, file_outputs, and compare_models
 main.py              # Main end-to-end pipeline CLI
 ```
+
+`Output/` is staging only: finished runs are filed by topic into the downstream
+`exploring-pathways/Pathways/<Topic>/<Brand>/<Clase|Date>/` folders with
+`scripts/Python/file_outputs.py`, so `Output/` normally holds nothing but `.gitkeep`.
 
 ## Models Supported
 
