@@ -40,21 +40,31 @@ Spanish summary, an English one gets English.
 
 ## Where outputs go
 
-`Output/` is a **staging area, not the destination.** Every run's artifacts belong in the
-downstream knowledge repo, filed by topic:
+`Output/` is a **staging area, not the destination.** Every run's artifacts belong in a downstream
+knowledge repo, filed by topic:
 
-```
-exploring-pathways/Pathways/<Topic>/<Brand or Person>/<ClaseN | YYYYMMDD>/
-    <stem>.txt
-    <stem>.lang
-    <stem>_timestamps.txt
-    <stem>_summary_luna.md
-```
+- **Tax-preparer recordings → `ky-tax-preparer`** (dedicated repo; `exploring-pathways` only keeps a
+  pointer README for that pathway):
+
+  ```
+  ky-tax-preparer/course-archives/<Brand>/<ClaseN | YYYYMMDD>/
+      <stem>.txt
+      <stem>.lang
+      <stem>_timestamps.txt
+      <stem>_summary_openai_luna.md
+  ```
+
+- **Every other topic → `exploring-pathways`:**
+
+  ```
+  exploring-pathways/Pathways/<Topic>/<Brand or Person>/<ClaseN | YYYYMMDD>/
+  ```
 
 After a run, move the artifacts there (transcript, `.lang`, timestamps and the summary), and
 leave `Output/` empty apart from `.gitkeep`:
 
 ```bash
+uv run scripts/Python/file_outputs.py "<stem>" --dest "C:\\...\\ky-tax-preparer\\course-archives\\<Brand>\\<Clase>"
 uv run scripts/Python/file_outputs.py "<stem>" --dest "C:\\...\\exploring-pathways\\Pathways\\<Topic>\\<Brand>\\<Clase|Date>"
 ```
 
@@ -63,14 +73,14 @@ missing artifacts instead of failing. Topic folders in use:
 
 | Recording type | Folder |
 |---|---|
-| Tax preparer courses | `TaxPreparer\<Brand>\<ClaseN>` (e.g. `TaxMaster\Clase2`, `HugoTaxPro\Preparatorio`, `ClasesDeTaxes[\Software]`, `EdukInstitute\Clase3`, `KTA_Institute\Classes`, `ProFinanceAcademy\Classes`) |
-| Credit repair / funding | `CreditRepair\<Brand>[\<Person>][\<YYYYMMDD>]` (e.g. `UnionSolutions\20261020`, `CashFlowVIP\20261003`, `CapitalFunding\JoseKalil`) |
-| Cybersecurity | `Cyber\<Vendor>\<Person>` or `CyberSec\<Program>` |
-| Insurance sales | `Insurance\<Person>` (e.g. `Insurance\GustavoAbreu`) |
-| TikTok Shop | `TikTok\TikTokWiz\<YYYYMMDD>` |
-| Machine learning | `ML\<Person>\<YYYYMMDD>` |
-| Digital marketing | `DigitalMarketing\<Person>\<YYYYMMDD>` |
-| Amazon / e-commerce | `Amazon\<Brand>\<YYYYMMDD>` |
+| Tax preparer courses | `ky-tax-preparer\course-archives\<Brand>\<ClaseN>` (e.g. `HugoTaxPro\Preparatorio`, `HugoTaxPro\Clase3`, `TaxMaster\Clase3`, `ClasesDeTaxes[\Software]`, `EdukInstitute\Clase3`, `KTA_Institute\Classes\<YYYYMMDD>`, `ProFinanceAcademy\Classes\<YYYYMMDD>`) |
+| Credit repair / funding | `exploring-pathways\Pathways\CreditRepair\<Brand>[\<Person>][\<YYYYMMDD>]` (e.g. `UnionSolutions\20261020`, `CashFlowVIP\20261003`, `CapitalFunding\JoseKalil`) |
+| Cybersecurity | `exploring-pathways\Pathways\Cyber\<Vendor>\<Person>` or `CyberSec\<Program>` |
+| Insurance sales | `exploring-pathways\Pathways\Insurance\<Person>` (e.g. `Insurance\GustavoAbreu`) |
+| TikTok Shop | `exploring-pathways\Pathways\TikTok\TikTokWiz\<YYYYMMDD>` |
+| Machine learning | `exploring-pathways\Pathways\ML\<Person>\<YYYYMMDD>` |
+| Digital marketing | `exploring-pathways\Pathways\DigitalMarketing\<Person>\<YYYYMMDD>` |
+| Amazon / e-commerce | `exploring-pathways\Pathways\Amazon\<Brand>\<YYYYMMDD>` |
 
 When a topic is new, follow the existing pattern (topic → brand/person → class or date) instead of
 creating a flat folder. Those artifacts are the user's working documents, so don't delete or

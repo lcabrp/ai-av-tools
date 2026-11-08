@@ -13,7 +13,10 @@ the destination with the same size and mtime are left alone.
 
 Usage:
     uv run scripts/Python/file_outputs.py "LIVE PREPARATORIO [ke_fvNlrVnE]" \
-        --dest "C:\\...\\exploring-pathways\\Pathways\\TaxPreparer\\HugoTaxPro\\Preparatorio"
+        --dest "C:\\...\\ky-tax-preparer\\course-archives\\HugoTaxPro\\Preparatorio"
+
+Tax-preparer recordings go to the ky-tax-preparer repo; every other topic goes to
+exploring-pathways\\Pathways\\<Topic>\\<Brand>\\<Clase|Date>.
 """
 
 import argparse

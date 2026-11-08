@@ -214,8 +214,9 @@ scripts/Python/      # Transcribe, youtube_transcript, summarize, file_outputs, 
 main.py              # Main end-to-end pipeline CLI
 ```
 
-`Output/` is staging only: finished runs are filed by topic into the downstream
-`exploring-pathways/Pathways/<Topic>/<Brand>/<Clase|Date>/` folders with
+`Output/` is staging only: finished runs are filed by topic into the downstream repos —
+`ky-tax-preparer/course-archives/<Brand>/<Clase|Date>/` for tax-preparer recordings, and
+`exploring-pathways/Pathways/<Topic>/<Brand>/<Clase|Date>/` for everything else — using
 `scripts/Python/file_outputs.py`, so `Output/` normally holds nothing but `.gitkeep`.
 
 ## Models Supported
