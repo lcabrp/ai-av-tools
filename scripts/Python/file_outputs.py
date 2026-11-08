@@ -21,6 +21,10 @@ import shutil
 import sys
 from pathlib import Path
 
+# Windows consoles default to cp1252, which crashes on emoji/accents in file names
+# (same fix as summarize.py and benchmark_transcription.py).
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 
