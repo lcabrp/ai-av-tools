@@ -1,4 +1,4 @@
-# Growth Partners
+# av-tools
 
 Extract insights from audio/video files using local or cloud AI models.
 
@@ -8,6 +8,8 @@ Extract insights from audio/video files using local or cloud AI models.
 
 - Python 3.13+ (managed via `uv`)
 - ffmpeg (for audio/video processing, installable via `winget install --id Gyan.FFmpeg`)
+- Deno (JavaScript runtime that `yt-dlp` needs for YouTube extraction — see
+  [Download Audio from YouTube](#download-audio-from-youtube-mp3--m4a--opus))
 - Ollama (for local models) OR API keys (OpenAI, Anthropic, Google Gemini)
 
 ### Installation
@@ -80,6 +82,115 @@ If a video has subtitles disabled, `main.py` automatically falls back to downloa
 audio with `yt-dlp` (saved under `Docs/Audio/youtube/`, skipped if already downloaded) and
 transcribing it locally with faster-whisper before summarizing — so the end-to-end pipeline
 works for any YouTube URL.
+
+### Download Audio from YouTube (MP3 / M4A / Opus)
+
+A 4KVideoDownloader-style downloader: give it one or more URLs (or a playlist) and it saves
+tagged audio with embedded cover art.
+
+```bash
+# Default: M4A (bit-exact copy of YouTube's AAC), saved to Output/downloads/m4a/
+uv run scripts/Python/download_audio.py "https://youtu.be/VIDEO_ID"
+
+# MP3, if a device/car stereo needs it
+uv run scripts/Python/download_audio.py "https://youtu.be/VIDEO_ID" --preset mp3
+
+# Several videos or a whole playlist at once
+uv run scripts/Python/download_audio.py URL1 URL2 URL3
+uv run scripts/Python/download_audio.py "https://www.youtube.com/playlist?list=..." --playlist
+
+# Batch from a text file (one URL per line, blank lines and # comments ignored)
+uv run scripts/Python/download_audio.py --batch-file urls.txt --preset mp3-vbr
+
+# Preview titles/durations without downloading anything
+uv run scripts/Python/download_audio.py URL --dry-run
+
+# Cut silent padding off the end of each file (lossless)
+uv run scripts/Python/download_audio.py URL --trim-silence
+
+# Prefer a specific track on a multi-language / auto-dubbed video (optional)
+uv run scripts/Python/download_audio.py URL --audio-lang es
+
+# Age-restricted or "confirm you're not a bot" videos
+uv run scripts/Python/download_audio.py URL --cookies-from-browser chrome
+uv run scripts/Python/download_audio.py URL --cookies path\to\cookies.txt   # if the browser file is locked
+```
+
+If YouTube answers "Sign in to confirm you're not a bot" it is usually a temporary block on your
+IP after many requests (e.g. a big playlist): waiting a while is enough. To get past it sooner,
+pass your logged-in browser's cookies. Chrome and Edge lock their cookie file while running (they
+also keep background processes after you close the window), so quit them completely first, or use
+`--cookies` with a `cookies.txt` exported from the browser.
+
+Files land in `Output/downloads/<preset>/` (git-ignored; change it with `--output-dir`) as `<title> [<video_id>].<ext>` with title,
+artist, and date tags plus the thumbnail as cover art. A `.downloaded.txt` archive per preset
+skips videos you already fetched (`--no-archive` forces a re-download). Because it uses
+`yt-dlp`, it also works on other supported sites (SoundCloud, Vimeo, ...), not just YouTube.
+YouTube auto-dubbing can expose many audio tracks, and occasionally the default one is broken
+(a few seconds of sound, then silence, repeating). You don't need any flag for that: every
+download is scanned for silence, and a mostly-silent track is automatically swapped for the first
+clean alternative track. Silence at the very start or end of a video is only reported as a note,
+because the upload itself is padded and no track can fix it. Add `--trim-silence` to cut that
+trailing silence (5 s or longer) off each file: it is a stream copy, so the audio, tags and cover
+art are untouched, and 0.5 s is kept after the last sound. `--audio-lang es` (or `en`, `es-MX`)
+only sets a preference for genuinely multi-language videos; it is optional.
+
+Presets:
+
+| Preset | Output | Notes |
+|---|---|---|
+| `m4a` (default) | AAC | **Bit-exact copy of YouTube's audio** — no re-encode, no quality loss, plays on Windows/macOS/iOS/Android and modern car stereos |
+| `mp3` | MP3 320 kbps CBR | Re-encodes the lossy source: bigger *and* slightly worse. Only for MP3-only gear (old car stereos, some DJ software) |
+| `mp3-vbr` | MP3 LAME V0 (~245 kbps) | Best MP3 quality-per-byte when you do need MP3 |
+| `opus` | Opus | True stream copy of YouTube's Opus stream — smallest file, highest fidelity per byte |
+| `flac` | FLAC | Lossless container of the decoded source (large, no gain over the source) |
+| `wav` | WAV 16-bit PCM | Uncompressed, for editing |
+| `native` | Original stream (`.webm`/`.m4a`) | No conversion at all — the true "no quality loss" option |
+
+**About bitrate ("I want 320 kbps"):** YouTube has no 320 kbps stream. Its best audio is AAC
+~128-130 kbps or Opus ~106-160 kbps, so a 320 kbps MP3 is a padded re-encode of a lossy source —
+3× the size for audio slightly *worse* than the original. The default `m4a` preset avoids the
+whole problem by copying the source stream bit-for-bit, which is the highest quality that exists
+for that video. Choose `mp3` only for device compatibility, not for quality.
+
+#### Requirements on a new PC (ffmpeg + Deno)
+
+Two tools must be on `PATH` before the downloader works properly. Neither ships with the repo:
+
+```powershell
+winget install --id Gyan.FFmpeg      # required: conversion, remuxing, tags
+winget install --id DenoLand.Deno    # required: YouTube extraction by yt-dlp
+```
+
+Then **open a new terminal** — `winget` edits `PATH`, and an already-running shell will not see
+it. Verify both:
+
+```powershell
+ffmpeg -version    # should print a version banner
+deno --version     # should print "deno 2.x.x"
+```
+
+Why Deno: YouTube's web player ships obfuscated JavaScript that computes signature and `n`
+parameters, which are embedded in the real media URLs. yt-dlp no longer bundles its own JS
+interpreter, so it uses a JS runtime (Deno by default) to run that code. It is used only for a
+moment during extraction — not a background service, and it is not involved in converting or
+transcribing anything. Without it, yt-dlp prints:
+
+```
+WARNING: [youtube] No supported JavaScript runtime could be found...
+some formats may be missing
+```
+
+Downloads may still succeed, but often with fewer/lower-quality formats available, and they
+break sooner when YouTube changes its player.
+
+Deno is what yt-dlp enables on its own. If you only have Node or Bun, yt-dlp does *not* pick it
+up automatically — so `download_audio.py` detects `deno`/`node`/`bun` on `PATH` and passes
+whichever it finds to yt-dlp, and prints the hint above when none exist. Any of the three works;
+Deno is the recommended one because it is yt-dlp's default and best tested.
+
+Install it only if you plan to download from YouTube — Whisper transcription and summarization
+do not need it.
 
 ### Transcribe Audio/Video
 
@@ -205,12 +316,12 @@ uv run scripts/Python/compare_models.py Output/transcripts/sample.txt
 ## Project Structure
 
 ```
-Docs/Audio/          # Audio files (not tracked)
+Docs/Audio/          # Audio files (not tracked); downloads/ holds MP3/M4A/Opus output
 Docs/Video/          # Video files (not tracked)
 Output/
   transcripts/       # Generated transcripts (staging: move them to exploring-pathways)
   *_summary_*.md     # Markdown summaries, tagged per provider (staging)
-scripts/Python/      # Transcribe, youtube_transcript, summarize, file_outputs, and compare_models
+scripts/Python/      # Transcribe, youtube_transcript, download_audio, summarize, file_outputs, compare_models
 main.py              # Main end-to-end pipeline CLI
 ```
 

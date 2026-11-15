@@ -6,9 +6,29 @@ Operational rules for agents working in this repo. Keep changes consistent with 
 
 - Windows + PowerShell. Use `uv` for everything; never `pip`.
   - `uv sync --locked`, `uv run python -u ...`, `uv run main.py ...`
+
+## Available tools on this PC
+
+The full list (with usage notes) is in the global OpenCode instructions at
+`~/.config/opencode/instructions.md`. Summary of the non-obvious ones:
+
+- **Search/navigation:** `rg` (text), `ast-grep` (syntax-aware), `fd` (files), `bat` (preview), `fzf` (fuzzy).
+- **Data:** `jq` (JSON), `duckdb` (CSV/Parquet/Arrow — never read raw into context), `sqlcmd` (SQL Server).
+- **Python:** `uv` (never pip), `ruff` (lint/format), `nbstripout` (notebooks).
+- **GitHub:** `gh` (CLI).
+- **Node/JS:** `node`, `npm`, `repomix` (context packaging).
+- **Media:** `ffmpeg` (audio/video), `deno` (JS runtime for yt-dlp).
+- **Shell helpers:** `rtk` (command prefix), `rtk proxy <cmd>` for unsupported commands.
 - The project root is the working directory for all commands.
 - API keys live in `.env` at the repo root (git-ignored): `OPENAI_API_KEY`, `GEMINI_API_KEY`,
   and optionally `ANTHROPIC_API_KEY`.
+- External binaries must be on `PATH` (installed once per machine, never via `uv`):
+  - `ffmpeg` — audio/video conversion, remuxing, tagging: `winget install --id Gyan.FFmpeg`
+  - `deno` — JS runtime `yt-dlp` uses to extract YouTube URLs:
+    `winget install --id DenoLand.Deno`
+  `winget` edits `PATH`, so **restart the shell** afterwards. A stale shell does not fail loudly —
+  yt-dlp just warns `No supported JavaScript runtime could be found` and silently offers fewer
+  formats. Verify with `ffmpeg -version` and `deno --version` on a new machine.
 
 ## Summarization provider policy
 
@@ -86,6 +106,29 @@ When a topic is new, follow the existing pattern (topic → brand/person → cla
 creating a flat folder. Those artifacts are the user's working documents, so don't delete or
 reorganize archived files without being asked.
 
+## Downloading audio (MP3) from a URL
+
+`scripts/Python/download_audio.py` is a standalone downloader (yt-dlp + ffmpeg + Deno), separate
+from the summarize pipeline:
+
+```bash
+uv run scripts/Python/download_audio.py "<url>" [--preset mp3|mp3-vbr|m4a|opus|flac|wav|native]
+```
+
+- Output goes to `Output/downloads/<preset>/` (git-ignored). That is a **personal media
+  library**, not a knowledge-repo destination — do not file those MP3s into `exploring-pathways`
+  or `ky-tax-preparer`. It is also **exempt from the "leave `Output/` empty" rule** above: never
+  move or delete `Output/downloads/` when cleaning up after a transcript/summary run.
+- Default is `m4a`, a bit-exact stream copy of YouTube's AAC audio (plays on Windows/macOS/iOS/
+  Android and modern car stereos). `--preset mp3` re-encodes the already-lossy source: bigger and
+  slightly worse, only for MP3-only hardware. YouTube has no 320 kbps stream (~128-130 kbps AAC is
+  the ceiling), so never present MP3 320 as an upgrade in quality.
+- `--dry-run` previews titles/durations, `--playlist` expands playlists, `--batch-file urls.txt`
+  queues many URLs, `--cookies-from-browser chrome` handles age-restricted/bot-checked videos.
+- The script detects `deno`/`node`/`bun` and passes them to yt-dlp (which only enables
+  `deno` by itself), printing an install hint when none is found. If a user reports "fewer
+  formats"/low quality on a new machine, that warning is the first thing to look for.
+
 ## Standard workflow for a local audio/video file
 
 1. Verify the file exists and get its duration with `ffprobe`.
@@ -94,7 +137,7 @@ reorganize archived files without being asked.
    → `Output/transcripts/<name>.txt` (faster-whisper `medium`, CUDA FP16 on this machine).
 3. Summarize with Luna:
    `uv run scripts/Python/summarize.py "Output/transcripts/<name>.txt" --provider openai --openai-model gpt-6-luna`
-   → `Output/<name>_summary_luna.md` (or `_summary_openai_luna.md` if `--output` is omitted).
+   → `Output/<name>_summary_openai_luna.md` (the tag comes from the model, e.g. `_summary_openai_terra.md`).
 4. Validate: check the file exists and is non-trivial (chars/words/lines), then read the first
    ~20 lines to confirm the content matches the recording.
 5. File the artifacts into the topic folder in `exploring-pathways` with

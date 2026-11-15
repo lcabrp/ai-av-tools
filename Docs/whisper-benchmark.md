@@ -25,8 +25,8 @@ Choose the compute type for the GPU:
 `faster-whisper` also decodes media through PyAV, while `openai-whisper` shells out to FFmpeg.
 FFmpeg is still required by the benchmark script to create a consistent timed slice.
 
-The production transcription script still uses `openai-whisper`; migrating it to
-`faster-whisper` is a separate implementation change.
+`scripts/Python/transcribe.py` has since moved to `faster-whisper` too (see *Follow-up (done)*
+below), and `benchmark_transcription.py` now drives only `faster-whisper`.
 
 ## Reference results — NVIDIA T1000 8GB
 
@@ -291,8 +291,8 @@ Prerequisites: NVIDIA GPU with a recent driver, [uv](https://docs.astral.sh/uv/)
 described in the Arc Pro B70 section instead.
 
 ```bash
-git clone <this repo> && cd ai-av-tools
-uv sync                # installs torch from the cu124 index + whisper + faster-whisper
+git clone <this repo> && cd av-tools
+uv sync                # installs torch from the cu124 index + faster-whisper
 
 # 1) Verify GPU is visible to torch (must say True and show the GPU name)
 uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
@@ -303,8 +303,8 @@ uv run scripts/Python/benchmark_transcription.py "E:\path\to\TaxPreparer_KTA_Ins
 # 3) Full-file benchmark (takes a while)
 uv run scripts/Python/benchmark_transcription.py "E:\path\to\file.mp3" --slice 0 --language es
 
-# Optional: also time tiny/base/small/medium on openai-whisper
-uv run scripts/Python/benchmark_transcription.py file.mp3 --all-models
+# Optional: benchmark a different model size (tiny/base/small/medium/large)
+uv run scripts/Python/benchmark_transcription.py file.mp3 --model large
 ```
 
 The script saves each transcript plus `bench_output/benchmark_report.txt` (system header +

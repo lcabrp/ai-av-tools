@@ -7,6 +7,9 @@ Docs/Video/*
 !Docs/Audio/.gitkeep
 !Docs/Video/.gitkeep
 
+# Music downloaded by scripts/Python/download_audio.py (personal media, never committed)
+Output/downloads/
+
 
 # Python
 __pycache__/
