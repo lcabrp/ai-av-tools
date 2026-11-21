@@ -1,5 +1,5 @@
 [project]
-name = "av-tools"
+name = "ai-av-tools"
 version = "0.1.0"
 description = "Extract insights from audio/video files using local or cloud AI models"
 readme = "README.md"

@@ -1,4 +1,4 @@
-# av-tools
+# ai-av-tools
 
 Extract insights from audio/video files using local or cloud AI models.
 

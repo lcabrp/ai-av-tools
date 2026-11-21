@@ -291,7 +291,7 @@ Prerequisites: NVIDIA GPU with a recent driver, [uv](https://docs.astral.sh/uv/)
 described in the Arc Pro B70 section instead.
 
 ```bash
-git clone <this repo> && cd av-tools
+git clone <this repo> && cd ai-av-tools
 uv sync                # installs torch from the cu124 index + faster-whisper
 
 # 1) Verify GPU is visible to torch (must say True and show the GPU name)

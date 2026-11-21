@@ -1,6 +1,6 @@
 """File a run's artifacts into its topic folder (e.g. exploring-pathways/Pathways/...).
 
-av-tools writes transcripts to Output/transcripts and summaries to Output/. Those
+ai-av-tools writes transcripts to Output/transcripts and summaries to Output/. Those
 are staging locations: every recording belongs to a topic folder in the downstream
 knowledge repo, so after a run its artifacts are moved there:
 
